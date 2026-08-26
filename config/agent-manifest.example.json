@@ -1,0 +1,19 @@
+{
+  "name": "video-agent",
+  "description": "Generates nature videos from a text prompt",
+  "version": "0.1.0",
+  "url": "http://127.0.0.1:7101",
+  "capabilities": { "streaming": true },
+  "skills": [
+    {
+      "id": "video_generation.nature",
+      "name": "Nature video generation",
+      "description": "Renders a nature video clip from a prompt",
+      "tags": ["video", "generation"],
+      "examples": ["A timelapse of a mountain sunrise"],
+      "inputModes": ["text/plain"],
+      "outputModes": ["application/json"]
+    }
+  ],
+  "provider": { "organization": "2mes4" }
+}

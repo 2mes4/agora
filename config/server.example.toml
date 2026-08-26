@@ -1,0 +1,16 @@
+# Example gateway configuration
+
+# Consumed by `agora-server` via `--config config/server.example.toml`.
+# Every field is optional; CLI flags override file values.
+
+bind = "0.0.0.0:7100"
+
+# Host the built-in demo echo agent (card at /a2a/echo/.well-known/agent-card.json)
+demo_agent = true
+
+# Public base URL advertised in hosted agents' cards.
+# Defaults to http://<bind-host>:<bind-port> when unset.
+# advertise = "https://agora.example.com"
+
+# Log output format: "text" or "json"
+log_format = "json"
