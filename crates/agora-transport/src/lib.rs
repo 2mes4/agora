@@ -53,15 +53,30 @@ pub struct A2aState {
 }
 
 impl A2aState {
-    /// Build a state with default permissive governance and no bus.
+    /// Build a state with default permissive governance, an in-memory task
+    /// manager, and no bus.
     pub fn new(card: AgentCard, handler: Arc<dyn AgentHandler>) -> Self {
+        Self::new_with_tasks(card, handler, Arc::new(TaskManager::new()))
+    }
+
+    /// Build a state with a custom task manager (e.g. store-backed).
+    pub fn new_with_tasks(
+        card: AgentCard,
+        handler: Arc<dyn AgentHandler>,
+        tasks: Arc<TaskManager>,
+    ) -> Self {
         Self {
             card,
             handler,
-            tasks: Arc::new(TaskManager::new()),
+            tasks,
             governance: GovernanceChain::permissive(),
             bus: None,
         }
+    }
+
+    /// Load persisted tasks (from the task store, when configured).
+    pub async fn hydrate(&self) -> Result<usize, agora_core::CoreError> {
+        self.tasks.hydrate().await
     }
 
     /// Replace the governance chain.

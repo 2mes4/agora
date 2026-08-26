@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt check run-example run-server clean
+.PHONY: build test lint fmt check run-example run-server clean docker-build docker-up docker-down
 
 build:
 	cargo build --workspace
@@ -20,6 +20,15 @@ run-example:
 
 run-server:
 	cargo run -p agora-server -- --demo-agent
+
+docker-build:
+	docker build -t 2mes4/agora:dev .
+
+docker-up:
+	docker compose up --build -d
+
+docker-down:
+	docker compose down
 
 clean:
 	cargo clean

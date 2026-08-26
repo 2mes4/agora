@@ -41,3 +41,4 @@ Links, specs, related ADRs.
 | [0003](0003-governance-as-middleware.md) | Governance as a policy chain | accepted |
 | [0004](0004-rust-stack.md) | Rust + tokio/axum stack | accepted |
 | [0005](0005-scope-non-goals.md) | Scope non-goals: no MCP, economy as a layer | accepted |
+| [0006](0006-postgresql-persistence.md) | PostgreSQL as the first persistent backend | accepted |

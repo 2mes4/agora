@@ -118,9 +118,15 @@ are introduced. Official project language: English.
 
 - **Part** — A unit of message content in A2A: `text`, `file`, or `data`.
 - **Pay-as-you-go** — (Vision) Usage-based billing model for agent skills.
+- **Persistence** — The durable storage of platform state (tasks, registry,
+  context). `agora-store` implements it against PostgreSQL
+  (`AGORA_DATABASE_URL`); without it the gateway is in-memory.
 - **Policy** — A single governance rule (`Policy` trait) evaluated against a
   `GovernanceContext`; returns Allow or Deny. MVP ships `AllowAll` and
   `AuditLog`.
+- **PostgreSQL** — The first persistent backend (`agora-store`): `agora_tasks`,
+  `agora_agents`, `agora_context` tables created automatically on connect.
+  Configured via `--database-url` / `AGORA_DATABASE_URL`.
 - **Push Notifications** — (Planned, M3) A2A capability to notify a client of
   task updates via webhook instead of a long-lived SSE connection.
 

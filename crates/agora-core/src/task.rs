@@ -6,6 +6,7 @@
 //! with `final: true` and terminates any open stream.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use chrono::{SecondsFormat, Utc};
 use tokio::sync::{broadcast, Mutex};
@@ -16,6 +17,8 @@ use crate::a2a::{
     TaskStatusUpdateEvent,
 };
 use crate::error::CoreError;
+use crate::task_store::TaskStore;
+use tracing::warn;
 
 /// How many past messages are retained in a task's history.
 const HISTORY_LIMIT: usize = 50;
@@ -31,18 +34,74 @@ struct TaskEntry {
 }
 
 /// The in-memory authority over task lifecycle.
-#[derive(Default)]
+///
+/// Tasks are mirrored to an optional [`TaskStore`] on every mutation and can
+/// be re-hydrated on startup via [`hydrate`](TaskManager::hydrate).
 pub struct TaskManager {
     inner: Mutex<HashMap<String, TaskEntry>>,
+    /// The agent this manager serves (used as the store partition key).
+    agent: String,
+    /// Optional durable backend.
+    store: Option<Arc<dyn TaskStore>>,
 }
 
 /// Snapshot of a task as held by the manager.
 pub type TaskSnapshot = Task;
 
 impl TaskManager {
-    /// Create an empty task manager.
+    /// Create an empty in-memory task manager.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            inner: Mutex::new(HashMap::new()),
+            agent: "default".to_string(),
+            store: None,
+        }
+    }
+
+    /// Create a task manager that mirrors every mutation to a store.
+    pub fn with_store(agent: impl Into<String>, store: Arc<dyn TaskStore>) -> Self {
+        Self {
+            inner: Mutex::new(HashMap::new()),
+            agent: agent.into(),
+            store: Some(store),
+        }
+    }
+
+    /// Mirror a task snapshot to the store; failures are logged, never fatal.
+    async fn persist(&self, task: &Task) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        if let Err(err) = store.persist(&self.agent, task).await {
+            warn!(
+                agent = %self.agent,
+                task = %task.id,
+                error = %err,
+                "task persistence failed"
+            );
+        }
+    }
+
+    /// Load persisted tasks for this agent back into memory.
+    ///
+    /// Tasks that already exist in memory are kept as-is. Returns the number
+    /// of tasks hydrated.
+    pub async fn hydrate(&self) -> Result<usize, CoreError> {
+        let Some(store) = &self.store else {
+            return Ok(0);
+        };
+        let tasks = store.load_all(&self.agent).await?;
+        let mut guard = self.inner.lock().await;
+        let mut loaded = 0;
+        for task in tasks {
+            if guard.contains_key(&task.id) {
+                continue;
+            }
+            let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+            guard.insert(task.id.clone(), TaskEntry { task, events });
+            loaded += 1;
+        }
+        Ok(loaded)
     }
 
     /// Create a task in `submitted` state and return its snapshot.
@@ -69,6 +128,7 @@ impl TaskManager {
                 events,
             },
         );
+        self.persist(&task).await;
         task
     }
 
@@ -132,6 +192,8 @@ impl TaskManager {
             final_: state.is_final(),
         });
         let _ = entry.events.send(event);
+        drop(guard);
+        self.persist(&snapshot).await;
         Ok(snapshot)
     }
 
@@ -151,6 +213,9 @@ impl TaskManager {
             last_chunk: true,
         });
         let _ = entry.events.send(event);
+        let snapshot = entry.task.clone();
+        drop(guard);
+        self.persist(&snapshot).await;
         Ok(())
     }
 
@@ -166,6 +231,12 @@ impl TaskManager {
             }
         }
         self.update_status(task_id, TaskState::Canceled, None).await
+    }
+}
+
+impl Default for TaskManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -1,0 +1,44 @@
+# AGORA gateway + PostgreSQL.
+#
+#   docker compose up --build
+#   curl http://127.0.0.1:7100/health
+#   curl http://127.0.0.1:7100/a2a/echo/.well-known/agent-card.json
+#
+# The gateway persists tasks, the agent registry, and context blobs in the
+# external PostgreSQL database configured via AGORA_DATABASE_URL. Point it
+# at any reachable instance by overriding the environment.
+
+services:
+  agora:
+    build: .
+    ports:
+      - "7100:7100"
+    environment:
+      AGORA_BIND: 0.0.0.0:7100
+      AGORA_DATABASE_URL: postgres://agora:agora@postgres:5432/agora
+      AGORA_LOG_FORMAT: json
+    command: ["--demo-agent"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agora
+      POSTGRES_PASSWORD: agora
+      POSTGRES_DB: agora
+    ports:
+      - "5432:5432"
+    volumes:
+      - agora-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agora -d agora"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  agora-pgdata:

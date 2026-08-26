@@ -23,8 +23,10 @@ pub mod envelope;
 pub mod error;
 pub mod handler;
 pub mod task;
+pub mod task_store;
 
 pub use envelope::{AgentId, Envelope};
 pub use error::CoreError;
 pub use handler::{AgentHandler, HandlerError, TaskCompletion, TaskContext};
 pub use task::{TaskManager, TaskSnapshot};
+pub use task_store::TaskStore;

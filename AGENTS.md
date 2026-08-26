@@ -35,13 +35,14 @@ standard, governed, asynchronous channel.
 
 | Crate | Responsibility | Depends on |
 |---|---|---|
-| `agora-core` | Canonical `Envelope`, A2A wire model (`a2a.rs`), `TaskManager` lifecycle, `AgentHandler` traits | — (tokio, serde) |
+| `agora-core` | Canonical `Envelope`, A2A wire model (`a2a.rs`), `TaskManager` lifecycle, `AgentHandler` traits, `TaskStore` trait | — (tokio, serde) |
 | `agora-transport` | A2A server: JSON-RPC dispatch + SSE streaming over axum | core, bus, governance |
 | `agora-bus` | `MessageBus` trait + `InProcessBus` | core |
 | `agora-registry` | Agent Card registry & discovery | core |
 | `agora-governance` | `Policy` trait + `GovernanceChain` (AllowAll, AuditLog) | core |
 | `agora-context` | `ContextStore` trait + in-memory store (`context_uri` blobs) | core |
-| `agora-server` | Gateway node binary (registry API + hosted agents) | transport + all |
+| `agora-store` | PostgreSQL persistence (sqlx): `PostgresStore` implements `TaskStore`/`Registry`/`ContextStore`; `StoreBackend` bundles seams | core, registry, context |
+| `agora-server` | Gateway node binary (registry API, `/v1/context`, hosted agents) | transport + store + all |
 | `agora-sdk` | Client: `delegate()`/`stream()`/directory; Server: `expose()` | core, transport |
 
 **Key types to know** (all in `agora-core`):
@@ -65,10 +66,19 @@ make lint           # cargo clippy --workspace --all-targets -- -D warnings
 make fmt            # cargo fmt --all
 make check          # fmt + lint + test (run this before finishing)
 make run-example    # e2e: two agents delegate over A2A
-make run-server     # gateway + demo echo agent on :7100
+make run-server     # gateway + demo echo agent on :7100 (in-memory)
+make docker-up      # gateway + PostgreSQL via docker compose
 ```
 
 **Always run `make check` before declaring work done.**
+
+PostgreSQL integration tests (`crates/agora-store/tests/postgres.rs`) skip
+unless `AGORA_TEST_DATABASE_URL` is set:
+
+```bash
+AGORA_TEST_DATABASE_URL=postgres://agora:agora@localhost:5432/agora_test \
+  cargo test -p agora-store
+```
 
 ## Conventions
 
@@ -91,6 +101,9 @@ make run-server     # gateway + demo echo agent on :7100
 
 - **Add a bus backend** (e.g. NATS): implement `agora_bus::MessageBus` in a new
   crate (or behind a feature) and wire it in `agora-server`. See ADR-0002.
+- **Add a persistence backend** (SQLite, …): implement `agora_core::TaskStore`
+  plus the existing `Registry`/`ContextStore` traits in a new crate and
+  extend `agora_store::StoreBackend`. See ADR-0006.
 - **Add a protocol adapter** (e.g. ACP): translate at the edge —
   `agora_transport::dispatch_jsonrpc` is the single entry point. Keep the
   canonical `Envelope` and `A2aEvent` untouched. See ADR-0001.

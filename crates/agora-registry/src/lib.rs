@@ -17,6 +17,9 @@ pub enum RegistryError {
     /// An agent with this name is already registered.
     #[error("agent already registered: {0}")]
     AlreadyRegistered(String),
+    /// A persistence backend failed.
+    #[error("database error: {0}")]
+    Database(String),
 }
 
 /// The agent directory abstraction.

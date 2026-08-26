@@ -12,5 +12,9 @@ demo_agent = true
 # Defaults to http://<bind-host>:<bind-port> when unset.
 # advertise = "https://agora.example.com"
 
+# PostgreSQL connection URL for the persistence backend. When unset, all
+# storage is in-memory. Tables are created automatically on connect.
+# database_url = "postgres://agora:agora@localhost:5432/agora"
+
 # Log output format: "text" or "json"
 log_format = "json"

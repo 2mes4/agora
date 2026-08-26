@@ -79,8 +79,9 @@ core contract.
 - Retry/fallback policies per task: attempts, backoff, fallback agent
   selection, TTL expiry honoring `Envelope.ttlMs`.
 - Dead-letter queue (DDLQ) with replay endpoint on the gateway.
-- SQLite persistence (`agora-store`): tasks, envelopes, context blobs
-  (`agora-context` SQLite backend).
+- Persistence: **shipped early — PostgreSQL backend (`agora-store`) with
+  tasks, registry, and context (ADR-0006, `AGORA_DATABASE_URL`)**. Remaining:
+  envelope journal and DDLQ tables.
 - Gateway multi-agent hosting: register a handler, get a stable
   `agent://name` address independent of URL.
 - Observability: OpenTelemetry traces export; per-task span with

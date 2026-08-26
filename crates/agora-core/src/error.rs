@@ -21,6 +21,10 @@ pub enum CoreError {
     #[error("invalid envelope: {0}")]
     InvalidEnvelope(String),
 
+    /// A persistence backend failed.
+    #[error("store error: {0}")]
+    Store(String),
+
     /// Serialization/deserialization failure.
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),

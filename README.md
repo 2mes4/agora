@@ -140,6 +140,60 @@ agent.serve().await?;
 See [`examples/01-direct-delegate`](examples/01-direct-delegate) for the full
 worked example.
 
+## Docker & PostgreSQL
+
+The official image ships the gateway plus the SDK demo binary, and can
+persist tasks, the agent registry, and context blobs in an **external
+PostgreSQL** database:
+
+```bash
+# Everything wired: gateway + PostgreSQL (tables auto-created)
+docker compose up --build
+
+curl http://127.0.0.1:7100/health
+curl http://127.0.0.1:7100/a2a/echo/.well-known/agent-card.json
+curl -X POST http://127.0.0.1:7100/a2a/echo \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"message":{"role":"user","parts":[{"kind":"text","text":"hola, docker!"}],"messageId":"m1"}}}'
+```
+
+Point the gateway at any reachable PostgreSQL by overriding
+`AGORA_DATABASE_URL`:
+
+```bash
+docker run --rm -p 7100:7100 \
+  -e AGORA_DATABASE_URL='postgres://user:pass@host:5432/db' \
+  -e AGORA_DEMO_AGENT=true \
+  2mes4/agora
+```
+
+Without a database URL the gateway runs fully in-memory (zero-config).
+
+### Configuration
+
+| Env var | CLI flag | Default |
+|---|---|---|
+| `AGORA_BIND` | `--bind` | `0.0.0.0:7100` |
+| `AGORA_DEMO_AGENT` | `--demo-agent` | off |
+| `AGORA_ADVERTISE` | `--advertise` | `http://127.0.0.1:<port>` |
+| `AGORA_DATABASE_URL` | `--database-url` | unset (in-memory) |
+| `AGORA_LOG_FORMAT` | `--log-format` | `text` (`json` supported) |
+
+A TOML config file (`--config`, see
+[`config/server.example.toml`](config/server.example.toml)) provides the same
+options; CLI flags override file values.
+
+### Gateway API
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | liveness |
+| `GET/POST /v1/agents` | directory: list / register Agent Cards |
+| `GET/DELETE /v1/agents/{name}` | directory lookup / removal |
+| `GET/PUT /v1/context` | context blobs by `?uri=` / `PUT` raw body → `uri` |
+| `POST /a2a/{agent}` | A2A JSON-RPC (`message/send`, `message/stream`, …) |
+| `GET /a2a/{agent}/.well-known/agent-card.json` | hosted agent discovery |
+
 ---
 
 ## Repository layout
@@ -152,6 +206,7 @@ worked example.
 | `crates/agora-registry` | Agent Card registry & discovery |
 | `crates/agora-governance` | Policy chain: auth / budget / audit (hooks live, policies minimal) |
 | `crates/agora-context` | Context store for pass-by-reference payloads (`context_uri`) |
+| `crates/agora-store` | PostgreSQL persistence: tasks, registry, context |
 | `crates/agora-server` | Gateway node binary |
 | `crates/agora-sdk` | Rust SDK: `delegate()` / `expose()` / directory client |
 | `examples/` | Runnable end-to-end scenarios |

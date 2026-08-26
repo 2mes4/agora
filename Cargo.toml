@@ -7,6 +7,7 @@ members = [
     "crates/agora-registry",
     "crates/agora-governance",
     "crates/agora-context",
+    "crates/agora-store",
     "crates/agora-server",
     "crates/agora-sdk",
     "examples/01-direct-delegate",
@@ -30,6 +31,7 @@ agora-bus = { path = "crates/agora-bus", version = "0.1.0" }
 agora-registry = { path = "crates/agora-registry", version = "0.1.0" }
 agora-governance = { path = "crates/agora-governance", version = "0.1.0" }
 agora-context = { path = "crates/agora-context", version = "0.1.0" }
+agora-store = { path = "crates/agora-store", version = "0.1.0" }
 agora-server = { path = "crates/agora-server", version = "0.1.0" }
 agora-sdk = { path = "crates/agora-sdk", version = "0.1.0" }
 
@@ -38,7 +40,7 @@ async-trait = "0.1"
 axum = "0.8"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }

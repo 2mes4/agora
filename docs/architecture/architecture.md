@@ -206,6 +206,18 @@ serves the directory API, and routes A2A traffic at `/a2a/{agent}`. The
 gateway shares the exact same `dispatch_jsonrpc` path as standalone agents —
 a node is just a set of agents behind one router (ADR-0002).
 
+The gateway boots against a `StoreBackend`:
+
+- **In-memory** (default, zero-config): tasks, registry, context are lost on
+  restart.
+- **PostgreSQL** (`--database-url` / `AGORA_DATABASE_URL`): tasks, the agent
+  registry, and context blobs persist; hosted agents hydrate their tasks at
+  mount time (ADR-0006).
+
+Gateway API: `/health`, `/v1/agents` (directory), `/v1/context`
+(pass-by-reference blobs), `/a2a/{agent}` (A2A JSON-RPC), and the hosted
+agent cards.
+
 ### 4.8 `agora-sdk` — the two primitives
 
 - **`delegate()`** (client): wraps the request, streams events, returns the
@@ -216,6 +228,19 @@ a node is just a set of agents behind one router (ADR-0002).
   `AgentHandler`.
 
 SDKs for other languages are M4; the wire contract is language-agnostic.
+
+### 4.9 `agora-store` — persistence backends
+
+`PostgresStore` (sqlx) implements the three storage seams:
+
+| Seam | Trait (core) | Table | Notes |
+|---|---|---|---|
+| Tasks | `TaskStore` (ADR-0006) | `agora_tasks` | full JSONB snapshots, keyed by agent; mirrored on every mutation, re-hydrated at mount |
+| Registry | `Registry` | `agora_agents` | Agent Cards as JSONB |
+| Context | `ContextStore` | `agora_context` | blobs addressed by `agora-postgres://` URIs |
+
+Tables are created idempotently on connect. The `TaskStore` trait lives in
+`agora-core` so any backend (SQLite later) is additive. See ADR-0006.
 
 ## 5. Operational modes
 

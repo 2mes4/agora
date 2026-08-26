@@ -1,0 +1,12 @@
+target
+.git
+.github
+docs
+config
+*.md
+Makefile
+.dockerignore
+Dockerfile
+docker-compose.yml
+LICENSE
+NOTICE

@@ -18,6 +18,9 @@ pub enum ContextError {
     /// The URI is not valid for this store.
     #[error("invalid context uri: {0}")]
     InvalidUri(String),
+    /// A persistence backend failed.
+    #[error("store error: {0}")]
+    Store(String),
 }
 
 /// A stored blob of context.

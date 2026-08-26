@@ -13,6 +13,10 @@ pub struct ServerConfig {
     pub demo_agent: Option<bool>,
     /// Public base URL advertised in hosted agents' cards.
     pub advertise: Option<String>,
+    /// PostgreSQL connection URL for the persistence backend
+    /// (`postgres://user:password@host:5432/dbname`). When unset, all
+    /// storage is in-memory.
+    pub database_url: Option<String>,
     /// Log format: `text` or `json`.
     pub log_format: Option<String>,
 }

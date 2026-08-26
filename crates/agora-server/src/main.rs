@@ -19,23 +19,29 @@ use tracing_subscriber::EnvFilter;
 )]
 struct Cli {
     /// Bind address.
-    #[arg(long, default_value = "0.0.0.0:7100")]
+    #[arg(long, env = "AGORA_BIND", default_value = "0.0.0.0:7100")]
     bind: String,
 
     /// Host the built-in demo echo agent.
-    #[arg(long)]
+    #[arg(long, env = "AGORA_DEMO_AGENT")]
     demo_agent: bool,
 
     /// Public base URL advertised in hosted agents' cards.
-    #[arg(long)]
+    #[arg(long, env = "AGORA_ADVERTISE")]
     advertise: Option<String>,
+
+    /// PostgreSQL connection URL for the persistence backend
+    /// (postgres://user:password@host:5432/dbname). When unset, all storage
+    /// is in-memory.
+    #[arg(long, env = "AGORA_DATABASE_URL")]
+    database_url: Option<String>,
 
     /// Path to a TOML configuration file (see config/server.example.toml).
     #[arg(long)]
     config: Option<PathBuf>,
 
     /// Log format: `text` or `json`.
-    #[arg(long, default_value = "text")]
+    #[arg(long, env = "AGORA_LOG_FORMAT", default_value = "text")]
     log_format: String,
 }
 
@@ -47,7 +53,20 @@ async fn main() -> anyhow::Result<()> {
 
     init_logging(&effective.log_format);
 
-    let gateway = Gateway::new();
+    let backend = match effective.database_url.as_deref() {
+        Some(url) => {
+            let store = agora_store::PostgresStore::connect(url).await?;
+            info!("connected to PostgreSQL persistence backend");
+            agora_store::StoreBackend::postgres(std::sync::Arc::new(store))
+        }
+        None => {
+            info!("no database configured; using in-memory storage");
+            agora_store::StoreBackend::memory()
+        }
+    };
+    let gateway =
+        Gateway::with_backend(std::sync::Arc::new(agora_bus::InProcessBus::new()), backend);
+
     let port = effective
         .bind
         .rsplit_once(':')
@@ -82,6 +101,7 @@ fn resolve(cli: Cli, file: ServerConfig) -> EffectiveConfig {
         bind: cli.bind,
         demo_agent: cli.demo_agent || file.demo_agent.unwrap_or(false),
         advertise: cli.advertise.or(file.advertise),
+        database_url: cli.database_url.or(file.database_url),
         log_format: cli.log_format,
     }
 }
@@ -90,6 +110,7 @@ struct EffectiveConfig {
     bind: String,
     demo_agent: bool,
     advertise: Option<String>,
+    database_url: Option<String>,
     log_format: String,
 }
 
