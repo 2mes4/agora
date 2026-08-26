@@ -1,0 +1,57 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/agora-core",
+    "crates/agora-transport",
+    "crates/agora-bus",
+    "crates/agora-registry",
+    "crates/agora-governance",
+    "crates/agora-context",
+    "crates/agora-server",
+    "crates/agora-sdk",
+    "examples/01-direct-delegate",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+authors = ["2mes4"]
+license = "Apache-2.0"
+repository = "https://github.com/2mes4/agora"
+homepage = "https://github.com/2mes4/agora"
+keywords = ["agents", "a2a", "agent-communication", "interop", "message-bus"]
+categories = ["network-programming", "asynchronous"]
+
+[workspace.dependencies]
+agora-core = { path = "crates/agora-core", version = "0.1.0" }
+agora-transport = { path = "crates/agora-transport", version = "0.1.0" }
+agora-bus = { path = "crates/agora-bus", version = "0.1.0" }
+agora-registry = { path = "crates/agora-registry", version = "0.1.0" }
+agora-governance = { path = "crates/agora-governance", version = "0.1.0" }
+agora-context = { path = "crates/agora-context", version = "0.1.0" }
+agora-server = { path = "crates/agora-server", version = "0.1.0" }
+agora-sdk = { path = "crates/agora-sdk", version = "0.1.0" }
+
+anyhow = "1"
+async-trait = "0.1"
+axum = "0.8"
+bytes = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+toml = "0.8"
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[profile.release]
+lto = "thin"
+strip = true
