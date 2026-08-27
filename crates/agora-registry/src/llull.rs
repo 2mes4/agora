@@ -117,6 +117,18 @@ impl LlullClient {
         service: &AgentService,
         is_online: bool,
     ) -> Result<(), LlullError> {
+        self.index_service_with_reputation(agent, service, is_online, 100.0)
+            .await
+    }
+
+    /// Index or update an agent service in Llull with dynamic reputation weighting.
+    pub async fn index_service_with_reputation(
+        &self,
+        agent: &AgentCard,
+        service: &AgentService,
+        is_online: bool,
+        reputation_score: f64,
+    ) -> Result<(), LlullError> {
         let doc_id = format!("{}:{}", agent.name, service.id);
         let tags_str = service.tags.join(" ");
         let combined_description = format!(
@@ -124,6 +136,11 @@ impl LlullClient {
             service.description.as_deref().unwrap_or(""),
             agent.description.as_deref().unwrap_or("")
         );
+
+        // Compute anti-fraud weighted ranking multiplier
+        let base_weight = if is_online { 1.5 } else { 1.0 };
+        let rep_multiplier = (reputation_score / 100.0).clamp(0.1, 2.0);
+        let final_weight = base_weight * rep_multiplier;
 
         let fields = json!({
             "agent_name": agent.name,
@@ -137,7 +154,8 @@ impl LlullClient {
             "currency": service.pricing.currency,
             "pricing_model": service.pricing.model,
             "online": is_online,
-            "weight": if is_online { 1.5 } else { 1.0 }
+            "reputation_score": reputation_score,
+            "weight": final_weight
         });
 
         let payload = LlullIndexPayload {

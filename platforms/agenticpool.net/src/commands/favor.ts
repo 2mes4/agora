@@ -43,34 +43,50 @@ export async function handleRequestFavor(options: {
 
     const task = resp?.result || resp;
     const taskState = task?.status?.state || 'completed';
+    const reply = task?.status?.message?.parts?.[0]?.text;
 
-    if (taskState === 'completed') {
-      // 3. Settle Escrow
-      ledger.settleEscrow(
+    // 3. Anti-Fraud Output Validation
+    const validation = ledger.validateOutput(reply);
+
+    if (taskState === 'completed' && validation.valid) {
+      // Settle Escrow (with 3% burn fee)
+      const { payment, burn, payout } = ledger.settleEscrow(
         credentials.agentName,
         options.target,
         priceDuckies,
         options.service,
         task?.id
       );
-      console.log(`\n🎉 Favor Completed Successfully!`);
-      console.log(`💸 ${priceDuckies} DUCKIES transferred to '${options.target}'.`);
 
-      const reply = task?.status?.message?.parts?.[0]?.text || JSON.stringify(task);
+      console.log(`\n🎉 Favor Completed Successfully!`);
+      console.log(`💸 ${payment.amount} DUCKIES settled:`);
+      console.log(`  ├─ Worker received: ${payout.amount} DUCKIES`);
+      console.log(`  └─ Network burn fee: ${burn.amount} DUCKIES (3% anti-wash fee burned)`);
+
       console.log(`\n📬 Result from '${options.target}':`);
       console.log(`-----------------------------------------`);
       console.log(reply);
       console.log(`-----------------------------------------\n`);
     } else {
-      // Refund Escrow
+      const reason = !validation.valid ? validation.reason! : `Task state was '${taskState}'`;
+      // Open Dispute / Refund Escrow
+      ledger.openDispute(
+        credentials.agentName,
+        options.target,
+        priceDuckies,
+        options.service,
+        reason,
+        task?.id
+      );
       ledger.refundEscrow(
         credentials.agentName,
         options.target,
         priceDuckies,
         options.service,
-        `Task ended in state '${taskState}'`
+        reason
       );
-      console.log(`\n⚠️  Favor did not complete (State: ${taskState}). Escrow refunded.`);
+      console.log(`\n⚠️  Favor rejected by anti-fraud check (${reason}).`);
+      console.log(`🛡️ Escrow refunded to '${credentials.agentName}'.`);
     }
   } catch (err: unknown) {
     ledger.refundEscrow(
@@ -83,4 +99,32 @@ export async function handleRequestFavor(options: {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`\n❌ Delegation error: ${msg}. Escrow refunded.`);
   }
+}
+
+export async function handleDisputeFavor(options: {
+  target: string;
+  service: string;
+  amount: number;
+  reason: string;
+  taskId?: string;
+}): Promise<void> {
+  const credentials = loadCredentials();
+  const ledger = new DuckiesLedger();
+
+  const dispute = ledger.openDispute(
+    credentials.agentName,
+    options.target,
+    options.amount,
+    options.service,
+    options.reason,
+    options.taskId
+  );
+
+  console.log(`\n⚖️ Dispute Opened!`);
+  console.log(`=========================================`);
+  console.log(`🆔 Dispute ID:    ${dispute.id}`);
+  console.log(`🎯 Target Agent:  ${options.target}`);
+  console.log(`💰 Amount:        ${options.amount} DUCKIES`);
+  console.log(`📝 Reason:        ${options.reason}`);
+  console.log(`⏳ Status:        ${dispute.status}`);
 }

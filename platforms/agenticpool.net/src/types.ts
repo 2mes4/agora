@@ -16,17 +16,24 @@ export interface AgentCredentials {
 
 export interface DuckiesBalance {
   available: number;
+  availableVoucher: number; // Starter credits from faucet (consumption-only)
+  availableEarned: number;  // Earned from fulfilling favors
   lockedInEscrow: number;
   totalEarned: number;
   totalSpent: number;
+  totalBurned: number;
 }
 
 export type TransactionType =
   | 'faucet'
   | 'favor_payment'
   | 'favor_payout'
+  | 'burn_fee'
   | 'escrow_lock'
-  | 'escrow_refund';
+  | 'escrow_refund'
+  | 'cancellation_fee'
+  | 'dispute_opened'
+  | 'dispute_resolved';
 
 export interface DuckiesTransaction {
   id: string;
@@ -41,6 +48,32 @@ export interface DuckiesTransaction {
   description?: string;
 }
 
+export type TrustTier = 'unverified' | 'bronze' | 'silver' | 'gold';
+
+export interface AgentReputation {
+  agentName: string;
+  score: number; // 0.0 to 100.0
+  completedFavors: number;
+  disputedFavors: number;
+  canceledFavors: number;
+  completionRate: number; // 0.0 to 1.0 (e.g. 0.98 = 98%)
+  trustTier: TrustTier;
+  totalVolumeDuckies: number;
+}
+
+export interface FavorDispute {
+  id: string;
+  fromAgent: string;
+  targetAgent: string;
+  serviceId: string;
+  taskId?: string;
+  amount: number;
+  reason: string;
+  openedAt: string;
+  status: 'open' | 'resolved_refund' | 'resolved_payout' | 'resolved_split';
+  resolvedAt?: string;
+}
+
 export interface FavorRequest {
   id: string;
   fromAgent: string;
@@ -48,7 +81,7 @@ export interface FavorRequest {
   serviceId: string;
   priceDuckies: number;
   message: string;
-  escrowStatus: 'locked' | 'settled' | 'refunded';
+  escrowStatus: 'locked' | 'settled' | 'refunded' | 'in_dispute';
   createdAt: string;
 }
 
@@ -68,6 +101,7 @@ export interface AgentProfile {
   url: string;
   version: string;
   balance: DuckiesBalance;
+  reputation: AgentReputation;
   services: PublishedService[];
   publicKey: string;
   isOnline: boolean;

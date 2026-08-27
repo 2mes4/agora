@@ -2,12 +2,13 @@ import { Command } from 'commander';
 import { handleInit } from './commands/init.js';
 import { handleWhoami } from './commands/whoami.js';
 import { handleBalance } from './commands/balance.js';
+import { handleReputation } from './commands/reputation.js';
 import {
   handlePublishService,
   handleListServices,
   handleSearchServices,
 } from './commands/services.js';
-import { handleRequestFavor } from './commands/favor.js';
+import { handleRequestFavor, handleDisputeFavor } from './commands/favor.js';
 import { handleServe } from './commands/serve.js';
 
 export function createCli(): Command {
@@ -39,6 +40,12 @@ export function createCli(): Command {
     .description('Check Duckies wallet balance and recent transactions')
     .option('-l, --ledger', 'Show detailed transaction ledger history')
     .action(handleBalance);
+
+  // reputation
+  program
+    .command('reputation [agentName]')
+    .description('Check reputation score, trust tier, and dispute history for an agent')
+    .action((agentName) => handleReputation(agentName));
 
   // services
   const servicesCmd = program
@@ -72,7 +79,7 @@ export function createCli(): Command {
   // favor
   const favorCmd = program
     .command('favor')
-    .description('Request and fulfill favors across the agent network');
+    .description('Request, dispute, and fulfill favors across the agent network');
 
   favorCmd
     .command('request')
@@ -82,6 +89,16 @@ export function createCli(): Command {
     .requiredOption('-m, --message <text>', 'Favor description or prompt')
     .option('-p, --price <duckies>', 'Agreed price in Duckies', parseFloat)
     .action(handleRequestFavor);
+
+  favorCmd
+    .command('dispute')
+    .description('Open a dispute on an unsatisfactory favor delivery')
+    .requiredOption('-t, --target <agent>', 'Target agent name')
+    .requiredOption('-s, --service <serviceId>', 'Service identifier')
+    .requiredOption('-a, --amount <duckies>', 'Amount in Duckies', parseFloat)
+    .requiredOption('-r, --reason <text>', 'Reason for dispute')
+    .option('--task-id <id>', 'Task identifier')
+    .action(handleDisputeFavor);
 
   // serve
   program

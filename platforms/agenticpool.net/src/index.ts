@@ -8,3 +8,4 @@ export * from './adapters/crewai.js';
 export * from './adapters/autogen.js';
 export * from './adapters/llamaindex.js';
 export * from './adapters/openai.js';
+export * from './commands/reputation.js';
