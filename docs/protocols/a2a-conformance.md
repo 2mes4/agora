@@ -37,8 +37,8 @@ Example card (served by the demo echo agent):
 | `message/stream` | ✅ | SSE stream of kind-tagged events, `final: true` terminates |
 | `tasks/get` | ✅ | Full task snapshot (status, artifacts, history) |
 | `tasks/cancel` | ✅ | Fails with `-32002` if already final |
-| `tasks/resubscribe` | ❌ deferred (M3) | Requires event history retention |
-| `message/stream` with `pushNotificationConfig` | ❌ deferred (M3) | Webhook delivery |
+| `tasks/resubscribe` | ✅ | Re-subscribes to live task event stream |
+| `message/stream` with `pushNotificationConfig` | ✅ | Webhook delivery on task lifecycle transitions |
 | Unknown method | ✅ | `-32601 Method not found` |
 
 ## 3. JSON-RPC error codes
@@ -48,7 +48,7 @@ Example card (served by the demo echo agent):
 | `-32700` | Parse error | ✅ |
 | `-32600` | Invalid request | ✅ |
 | `-32601` | Method not found | ✅ |
-| `-32602` | Invalid params | ✅ |
+| `-32602` | Invalid params | ✅ (including JSON Schema validation errors) |
 | `-32603` | Internal error | ✅ |
 | `-32001` | Task not found | ✅ |
 | `-32002` | Task not cancelable | ✅ |
@@ -93,20 +93,20 @@ Termination: the server ends the SSE stream immediately after the
 
 1. **Event wrapper**: we serialize the kind-tagged event object directly per
    SSE `data` line (newer A2A drafts use an envelope with `result`/`id`).
-   Interop tests against official SDKs (M3) will confirm the final shape; the
+   Interop tests against official SDKs will confirm the final shape; the
    client SDK is self-consistent either way.
-2. **Auth**: not enforced at transport level (trusted network assumption)
-   until M3; the `authentication` card field is declared but inert.
+2. **Auth**: supported via Bearer tokens (`Authorization: Bearer <key>`) and
+   `X-API-Key` headers, plumbed into `GovernanceContext.sender`.
 3. **Intents**: A2A has no native intent field on messages; AGORA derives it
    from the `data` part. Envelope-intent is an AGORA extension visible to
    governance and the bus — third parties lose nothing.
-4. **Schema validation**: skill `input_schema`/`output_schema` are accepted
-   in cards but not yet enforced (M3).
+4. **Schema validation**: skill `input_schema`/`output_schema` are validated
+   against payloads with standard JSON Schema (`jsonschema` crate), returning
+   `-32602 Invalid params` on validation mismatch.
 
 ## 8. Conformance test coverage
 
-`crates/agora-transport/tests/a2a_conformance.rs` exercises, against a real
-router:
+`crates/agora-conformance` provides an automated CLI and test harness verifying:
 
 - Card serving (fields + well-known path)
 - `message/send` → completed task (echo handler)

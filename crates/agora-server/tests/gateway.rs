@@ -74,6 +74,7 @@ async fn hosted_agent_card_and_dispatch() {
         params: serde_json::to_value(SendParams {
             message: Message::user_text("gateway hello"),
             configuration: None,
+            push_notification_config: None,
         })
         .unwrap(),
     };
@@ -175,4 +176,82 @@ async fn register_and_query_external_agent() {
     let bytes = to_bytes(response.into_body(), 1 << 20).await.unwrap();
     let card: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(card["name"], "external");
+}
+
+#[tokio::test]
+async fn dead_letters_api_and_replay() {
+    let gateway = gateway().await;
+    let app = gateway.router();
+
+    // 1. Store a dead letter directly in gateway state
+    let env = agora_core::Envelope::new(
+        "alice",
+        "echo",
+        "echo",
+        serde_json::to_value(Message::user_text("replayed hello")).unwrap(),
+    );
+    let dl = agora_core::DeadLetter::new(Some("task-123".into()), env, "Simulated failure", 3);
+    let dl_id = dl.id.clone();
+    gateway.state().dead_letter_store.store(dl).await.unwrap();
+
+    // 2. List dead letters
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/dead-letters")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["deadLetters"].as_array().unwrap().len(), 1);
+
+    // 3. Get single dead letter
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/dead-letters/{dl_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 4. Replay dead letter to target agent (echo)
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/dead-letters/{dl_id}/replay"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let rpc_res: Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(rpc_res["result"].is_object());
+    assert_eq!(rpc_res["result"]["status"]["state"], "completed");
+
+    // 5. Delete dead letter
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/v1/dead-letters/{dl_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
 }

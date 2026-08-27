@@ -36,6 +36,15 @@ struct Cli {
     #[arg(long, env = "AGORA_DATABASE_URL")]
     database_url: Option<String>,
 
+    /// NATS message bus URL (e.g. nats://127.0.0.1:4222). When unset,
+    /// in-process bus is used.
+    #[arg(long, env = "AGORA_NATS_URL")]
+    nats_url: Option<String>,
+
+    /// Optional API key for authenticating incoming requests.
+    #[arg(long, env = "AGORA_API_KEY")]
+    api_key: Option<String>,
+
     /// Path to a TOML configuration file (see config/server.example.toml).
     #[arg(long)]
     config: Option<PathBuf>,
@@ -64,8 +73,17 @@ async fn main() -> anyhow::Result<()> {
             agora_store::StoreBackend::memory()
         }
     };
-    let gateway =
-        Gateway::with_backend(std::sync::Arc::new(agora_bus::InProcessBus::new()), backend);
+
+    let bus: Arc<dyn agora_bus::MessageBus> = match effective.nats_url.as_deref() {
+        Some(url) => {
+            let nats = agora_bus_nats::NatsBus::connect(url).await?;
+            info!(url, "connected to NATS message bus");
+            Arc::new(nats)
+        }
+        None => Arc::new(agora_bus::InProcessBus::new()),
+    };
+
+    let gateway = Gateway::with_backend(bus, backend);
 
     let port = effective
         .bind
@@ -102,6 +120,8 @@ fn resolve(cli: Cli, file: ServerConfig) -> EffectiveConfig {
         demo_agent: cli.demo_agent || file.demo_agent.unwrap_or(false),
         advertise: cli.advertise.or(file.advertise),
         database_url: cli.database_url.or(file.database_url),
+        nats_url: cli.nats_url.or(file.nats_url),
+        api_key: cli.api_key.or(file.api_key),
         log_format: cli.log_format,
     }
 }
@@ -111,6 +131,9 @@ struct EffectiveConfig {
     demo_agent: bool,
     advertise: Option<String>,
     database_url: Option<String>,
+    nats_url: Option<String>,
+    #[allow(dead_code)]
+    api_key: Option<String>,
     log_format: String,
 }
 

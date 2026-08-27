@@ -90,6 +90,30 @@ impl PostgresStore {
         .execute(&pool)
         .await?;
 
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS agora_dead_letters (
+                id TEXT PRIMARY KEY,
+                task_id TEXT,
+                envelope JSONB NOT NULL,
+                error_message TEXT NOT NULL,
+                attempts INT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )",
+        )
+        .execute(&pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS agora_envelopes (
+                id TEXT PRIMARY KEY,
+                envelope JSONB NOT NULL,
+                status TEXT NOT NULL,
+                recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )",
+        )
+        .execute(&pool)
+        .await?;
+
         Ok(Self { pool })
     }
 
@@ -238,6 +262,183 @@ impl ContextStore for PostgresStore {
     }
 }
 
+#[async_trait]
+impl agora_core::DeadLetterStore for PostgresStore {
+    async fn store(&self, dead_letter: agora_core::DeadLetter) -> Result<(), CoreError> {
+        let envelope_json =
+            serde_json::to_value(&dead_letter.envelope).map_err(CoreError::Serialization)?;
+        sqlx::query(
+            "INSERT INTO agora_dead_letters (id, task_id, envelope, error_message, attempts, created_at)
+             VALUES ($1, $2, $3::jsonb, $4, $5, $6)
+             ON CONFLICT (id) DO UPDATE SET
+                error_message = $4, attempts = $5",
+        )
+        .bind(&dead_letter.id)
+        .bind(&dead_letter.task_id)
+        .bind(Json(envelope_json))
+        .bind(&dead_letter.error_message)
+        .bind(dead_letter.attempts as i32)
+        .bind(dead_letter.created_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| CoreError::DeadLetter(err.to_string()))?;
+        Ok(())
+    }
+
+    async fn list(&self, limit: usize) -> Result<Vec<agora_core::DeadLetter>, CoreError> {
+        let rows = sqlx::query(
+            "SELECT id, task_id, envelope, error_message, attempts, created_at
+             FROM agora_dead_letters
+             ORDER BY created_at DESC
+             LIMIT $1",
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| CoreError::DeadLetter(err.to_string()))?;
+
+        let mut list = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id: String = row
+                .try_get("id")
+                .map_err(|e| CoreError::DeadLetter(e.to_string()))?;
+            let task_id: Option<String> = row
+                .try_get("task_id")
+                .map_err(|e| CoreError::DeadLetter(e.to_string()))?;
+            let envelope_json: Json<serde_json::Value> = row
+                .try_get("envelope")
+                .map_err(|e| CoreError::DeadLetter(e.to_string()))?;
+            let error_message: String = row
+                .try_get("error_message")
+                .map_err(|e| CoreError::DeadLetter(e.to_string()))?;
+            let attempts: i32 = row
+                .try_get("attempts")
+                .map_err(|e| CoreError::DeadLetter(e.to_string()))?;
+            let created_at = row
+                .try_get("created_at")
+                .map_err(|e| CoreError::DeadLetter(e.to_string()))?;
+            let envelope = serde_json::from_value(envelope_json.0)?;
+            list.push(agora_core::DeadLetter {
+                id,
+                task_id,
+                envelope,
+                error_message,
+                attempts: attempts as u32,
+                created_at,
+            });
+        }
+        Ok(list)
+    }
+
+    async fn get(&self, id: &str) -> Result<Option<agora_core::DeadLetter>, CoreError> {
+        let row = sqlx::query(
+            "SELECT id, task_id, envelope, error_message, attempts, created_at
+             FROM agora_dead_letters
+             WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| CoreError::DeadLetter(err.to_string()))?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let id: String = row
+            .try_get("id")
+            .map_err(|e| CoreError::DeadLetter(e.to_string()))?;
+        let task_id: Option<String> = row
+            .try_get("task_id")
+            .map_err(|e| CoreError::DeadLetter(e.to_string()))?;
+        let envelope_json: Json<serde_json::Value> = row
+            .try_get("envelope")
+            .map_err(|e| CoreError::DeadLetter(e.to_string()))?;
+        let error_message: String = row
+            .try_get("error_message")
+            .map_err(|e| CoreError::DeadLetter(e.to_string()))?;
+        let attempts: i32 = row
+            .try_get("attempts")
+            .map_err(|e| CoreError::DeadLetter(e.to_string()))?;
+        let created_at = row
+            .try_get("created_at")
+            .map_err(|e| CoreError::DeadLetter(e.to_string()))?;
+        let envelope = serde_json::from_value(envelope_json.0)?;
+        Ok(Some(agora_core::DeadLetter {
+            id,
+            task_id,
+            envelope,
+            error_message,
+            attempts: attempts as u32,
+            created_at,
+        }))
+    }
+
+    async fn delete(&self, id: &str) -> Result<bool, CoreError> {
+        let result = sqlx::query("DELETE FROM agora_dead_letters WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|err| CoreError::DeadLetter(err.to_string()))?;
+        Ok(result.rows_affected() > 0)
+    }
+}
+
+#[async_trait]
+impl agora_core::EnvelopeJournal for PostgresStore {
+    async fn record(&self, envelope: &agora_core::Envelope, status: &str) -> Result<(), CoreError> {
+        let envelope_json = serde_json::to_value(envelope).map_err(CoreError::Serialization)?;
+        let id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO agora_envelopes (id, envelope, status, recorded_at)
+             VALUES ($1, $2::jsonb, $3, now())",
+        )
+        .bind(&id)
+        .bind(Json(envelope_json))
+        .bind(status)
+        .execute(&self.pool)
+        .await
+        .map_err(|err| CoreError::Store(err.to_string()))?;
+        Ok(())
+    }
+
+    async fn list(&self, limit: usize) -> Result<Vec<agora_core::JournalEntry>, CoreError> {
+        let rows = sqlx::query(
+            "SELECT id, envelope, status, recorded_at
+             FROM agora_envelopes
+             ORDER BY recorded_at DESC
+             LIMIT $1",
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| CoreError::Store(err.to_string()))?;
+
+        let mut list = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id: String = row
+                .try_get("id")
+                .map_err(|e| CoreError::Store(e.to_string()))?;
+            let envelope_json: Json<serde_json::Value> = row
+                .try_get("envelope")
+                .map_err(|e| CoreError::Store(e.to_string()))?;
+            let status: String = row
+                .try_get("status")
+                .map_err(|e| CoreError::Store(e.to_string()))?;
+            let recorded_at = row
+                .try_get("recorded_at")
+                .map_err(|e| CoreError::Store(e.to_string()))?;
+            let envelope = serde_json::from_value(envelope_json.0)?;
+            list.push(agora_core::JournalEntry {
+                id,
+                envelope,
+                status,
+                recorded_at,
+            });
+        }
+        Ok(list)
+    }
+}
+
 /// The bundle of storage seams a gateway operates with.
 pub struct StoreBackend {
     /// The agent directory.
@@ -246,6 +447,10 @@ pub struct StoreBackend {
     pub task_store: Option<Arc<dyn TaskStore>>,
     /// Durable context storage (optional).
     pub context_store: Option<Arc<dyn ContextStore>>,
+    /// Dead letter queue store.
+    pub dead_letter_store: Arc<dyn agora_core::DeadLetterStore>,
+    /// Message envelope journal.
+    pub envelope_journal: Arc<dyn agora_core::EnvelopeJournal>,
 }
 
 impl StoreBackend {
@@ -255,15 +460,19 @@ impl StoreBackend {
             registry: Arc::new(InMemoryRegistry::new()),
             task_store: None,
             context_store: None,
+            dead_letter_store: Arc::new(agora_core::InMemoryDeadLetterStore::new()),
+            envelope_journal: Arc::new(agora_core::InMemoryEnvelopeJournal::default()),
         }
     }
 
-    /// PostgreSQL-backed backend covering all three seams.
+    /// PostgreSQL-backed backend covering all storage seams.
     pub fn postgres(store: Arc<PostgresStore>) -> Self {
         Self {
             registry: store.clone(),
             task_store: Some(store.clone()),
-            context_store: Some(store),
+            context_store: Some(store.clone()),
+            dead_letter_store: store.clone(),
+            envelope_journal: store,
         }
     }
 }

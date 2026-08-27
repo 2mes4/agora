@@ -36,6 +36,7 @@ pub enum SdkError {
 #[derive(Clone)]
 pub struct AgoraClient {
     base: String,
+    api_key: Option<String>,
     http: reqwest::Client,
 }
 
@@ -48,17 +49,26 @@ impl AgoraClient {
         }
         Ok(Self {
             base,
+            api_key: None,
             http: reqwest::Client::new(),
         })
     }
 
+    /// Set an API key used for request authentication.
+    pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(key.into());
+        self
+    }
+
     /// Fetch the agent's discovery card.
     pub async fn agent_card(&self) -> Result<AgentCard, SdkError> {
-        let response = self
+        let mut req = self
             .http
-            .get(format!("{}/.well-known/agent-card.json", self.base))
-            .send()
-            .await?;
+            .get(format!("{}/.well-known/agent-card.json", self.base));
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+        let response = req.send().await?;
         let status = response.status();
         if !status.is_success() {
             return Err(SdkError::Unexpected(format!(
@@ -76,17 +86,29 @@ impl AgoraClient {
             text: None,
             data: None,
             context_id: None,
+            push_notification_config: None,
+            seal_to: None,
         }
     }
 
     /// Send a message and wait for the final task (`message/send`).
     pub async fn send(&self, message: Message) -> Result<Task, SdkError> {
+        self.send_with_push(message, None).await
+    }
+
+    /// Send a message with optional push notification webhook config.
+    pub async fn send_with_push(
+        &self,
+        message: Message,
+        push_notification_config: Option<agora_core::a2a::PushNotificationConfig>,
+    ) -> Result<Task, SdkError> {
         let result = self
             .rpc(
                 "message/send",
                 serde_json::to_value(SendParams {
                     message,
                     configuration: None,
+                    push_notification_config,
                 })?,
             )
             .await?;
@@ -95,6 +117,15 @@ impl AgoraClient {
 
     /// Open a streaming delegation (`message/stream`).
     pub async fn stream(&self, message: Message) -> Result<SseStream, SdkError> {
+        self.stream_with_push(message, None).await
+    }
+
+    /// Open a streaming delegation with optional push notification webhook config.
+    pub async fn stream_with_push(
+        &self,
+        message: Message,
+        push_notification_config: Option<agora_core::a2a::PushNotificationConfig>,
+    ) -> Result<SseStream, SdkError> {
         let request = JsonRpcRequest {
             jsonrpc: "2.0".into(),
             id: Some(Value::from(1)),
@@ -102,16 +133,20 @@ impl AgoraClient {
             params: serde_json::to_value(SendParams {
                 message,
                 configuration: None,
+                push_notification_config,
             })?,
         };
 
-        let response = self
+        let mut req = self
             .http
             .post(format!("{}/", self.base))
             .header(ACCEPT, "text/event-stream")
-            .json(&request)
-            .send()
-            .await?;
+            .json(&request);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let response = req.send().await?;
         let status = response.status();
         if !status.is_success() {
             let text = response.text().await?;
@@ -125,7 +160,6 @@ impl AgoraClient {
             .unwrap_or_default()
             .to_string();
         if !content_type.starts_with("text/event-stream") {
-            // The server answered with a JSON-RPC error instead of a stream.
             let rpc: JsonRpcResponse = response.json().await?;
             if let Some(error) = rpc.error {
                 return Err(SdkError::Rpc {
@@ -137,6 +171,36 @@ impl AgoraClient {
                 "expected text/event-stream response".into(),
             ));
         }
+        Ok(SseStream::new(response))
+    }
+
+    /// Re-subscribe to an existing task's stream (`tasks/resubscribe`).
+    pub async fn resubscribe(&self, task_id: &str) -> Result<SseStream, SdkError> {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(Value::from(1)),
+            method: "tasks/resubscribe".into(),
+            params: serde_json::to_value(agora_core::a2a::ResubscribeParams {
+                task_id: task_id.to_string(),
+            })?,
+        };
+
+        let mut req = self
+            .http
+            .post(format!("{}/", self.base))
+            .header(ACCEPT, "text/event-stream")
+            .json(&request);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let response = req.send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await?;
+            return Err(SdkError::Unexpected(format!("HTTP {status}: {text}")));
+        }
+
         Ok(SseStream::new(response))
     }
 
@@ -175,12 +239,11 @@ impl AgoraClient {
             method: method.into(),
             params,
         };
-        let response = self
-            .http
-            .post(format!("{}/", self.base))
-            .json(&request)
-            .send()
-            .await?;
+        let mut req = self.http.post(format!("{}/", self.base)).json(&request);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+        let response = req.send().await?;
         let status = response.status();
         let rpc: JsonRpcResponse = response.json().await?;
         if let Some(error) = rpc.error {
@@ -201,6 +264,8 @@ pub struct DelegateBuilder<'a> {
     text: Option<String>,
     data: Option<Value>,
     context_id: Option<String>,
+    push_notification_config: Option<agora_core::a2a::PushNotificationConfig>,
+    seal_to: Option<agora_core::EncryptionPublicKey>,
 }
 
 impl<'a> DelegateBuilder<'a> {
@@ -228,6 +293,21 @@ impl<'a> DelegateBuilder<'a> {
         self
     }
 
+    /// Configure push notification webhook URL and optional token (M3).
+    pub fn push_notification(mut self, url: impl Into<String>, token: Option<String>) -> Self {
+        self.push_notification_config = Some(agora_core::a2a::PushNotificationConfig {
+            url: url.into(),
+            token,
+        });
+        self
+    }
+
+    /// End-to-End Encrypt (E2EE) the payload for the target agent using its X25519 public key (M5).
+    pub fn seal_to(mut self, target_pubkey: agora_core::EncryptionPublicKey) -> Self {
+        self.seal_to = Some(target_pubkey);
+        self
+    }
+
     /// Build the A2A message this delegation represents.
     pub fn build_message(&self) -> Message {
         let mut parts = Vec::new();
@@ -243,6 +323,13 @@ impl<'a> DelegateBuilder<'a> {
                 map.insert("skill".into(), Value::String(skill.clone()));
             }
         }
+        if let Some(target_pubkey) = &self.seal_to {
+            if let Ok(sealed) = agora_core::seal_payload(&data, target_pubkey) {
+                data = serde_json::json!({
+                    "sealed": sealed,
+                });
+            }
+        }
         parts.push(Part::data(data));
         let mut message = Message::new(agora_core::a2a::MessageRole::User, parts);
         message.context_id = self.context_id.clone();
@@ -251,12 +338,16 @@ impl<'a> DelegateBuilder<'a> {
 
     /// Send the delegation synchronously; returns the final task.
     pub async fn send(self) -> Result<Task, SdkError> {
-        self.client.send(self.build_message()).await
+        self.client
+            .send_with_push(self.build_message(), self.push_notification_config)
+            .await
     }
 
     /// Stream the delegation; returns the event stream.
     pub async fn stream(self) -> Result<SseStream, SdkError> {
-        self.client.stream(self.build_message()).await
+        self.client
+            .stream_with_push(self.build_message(), self.push_notification_config)
+            .await
     }
 }
 

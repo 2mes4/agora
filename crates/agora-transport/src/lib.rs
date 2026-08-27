@@ -19,8 +19,8 @@ use std::sync::Arc;
 use agora_bus::MessageBus;
 use agora_core::a2a::error_codes;
 use agora_core::a2a::{
-    A2aEvent, AgentCard, GetTaskParams, JsonRpcRequest, JsonRpcResponse, Message, SendParams, Task,
-    TaskState,
+    A2aEvent, AgentCard, GetTaskParams, JsonRpcRequest, JsonRpcResponse, Message, Part,
+    PushNotificationConfig, ResubscribeParams, SendParams, Task, TaskState,
 };
 use agora_core::envelope::Envelope;
 use agora_core::handler::{AgentHandler, HandlerError, TaskCompletion, TaskContext};
@@ -28,6 +28,7 @@ use agora_core::task::TaskManager;
 use agora_governance::{GovernanceChain, GovernanceContext};
 use axum::body::Bytes;
 use axum::extract::State;
+use axum::http::{header, HeaderMap};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
@@ -105,8 +106,33 @@ async fn agent_card_route(State(state): State<Arc<A2aState>>) -> Json<AgentCard>
     Json(state.card.clone())
 }
 
-async fn jsonrpc_route(State(state): State<Arc<A2aState>>, body: Bytes) -> Response {
-    dispatch_jsonrpc(&state, body).await
+async fn jsonrpc_route(
+    State(state): State<Arc<A2aState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let sender = extract_sender_from_headers(&headers);
+    dispatch_jsonrpc_with_auth(&state, body, sender).await
+}
+
+/// Extract caller / sender identity from standard HTTP authentication headers.
+pub fn extract_sender_from_headers(headers: &HeaderMap) -> Option<String> {
+    if let Some(auth) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some(token) = auth
+            .strip_prefix("Bearer ")
+            .or_else(|| auth.strip_prefix("bearer "))
+        {
+            return Some(token.trim().to_string());
+        }
+        return Some(auth.trim().to_string());
+    }
+    if let Some(key) = headers.get("x-api-key").and_then(|v| v.to_str().ok()) {
+        return Some(key.trim().to_string());
+    }
+    None
 }
 
 /// Parse a JSON-RPC body and dispatch to the A2A methods.
@@ -114,6 +140,15 @@ async fn jsonrpc_route(State(state): State<Arc<A2aState>>, body: Bytes) -> Respo
 /// This is the single entry point for the A2A wire (ADR-0001): protocol
 /// adapters for other standards reuse the same canonical flow below.
 pub async fn dispatch_jsonrpc(state: &Arc<A2aState>, body: Bytes) -> Response {
+    dispatch_jsonrpc_with_auth(state, body, None).await
+}
+
+/// Dispatch JSON-RPC with authenticated sender identity (M3).
+pub async fn dispatch_jsonrpc_with_auth(
+    state: &Arc<A2aState>,
+    body: Bytes,
+    auth_sender: Option<String>,
+) -> Response {
     let request: JsonRpcRequest = match serde_json::from_slice(&body) {
         Ok(request) => request,
         Err(err) => {
@@ -127,10 +162,11 @@ pub async fn dispatch_jsonrpc(state: &Arc<A2aState>, body: Bytes) -> Response {
     };
 
     match request.method.as_str() {
-        "message/send" => handle_send(state, &request).await,
-        "message/stream" => handle_stream(state, &request).await,
+        "message/send" => handle_send(state, &request, auth_sender).await,
+        "message/stream" => handle_stream(state, &request, auth_sender).await,
         "tasks/get" => handle_get(state, &request).await,
         "tasks/cancel" => handle_cancel(state, &request).await,
+        "tasks/resubscribe" => handle_resubscribe(state, &request).await,
         other => Json(JsonRpcResponse::failure(
             request.id.clone(),
             error_codes::METHOD_NOT_FOUND,
@@ -141,7 +177,11 @@ pub async fn dispatch_jsonrpc(state: &Arc<A2aState>, body: Bytes) -> Response {
 }
 
 /// Synchronous delegation: returns the final task.
-async fn handle_send(state: &Arc<A2aState>, request: &JsonRpcRequest) -> Response {
+async fn handle_send(
+    state: &Arc<A2aState>,
+    request: &JsonRpcRequest,
+    auth_sender: Option<String>,
+) -> Response {
     let params: SendParams = match serde_json::from_value(request.params.clone()) {
         Ok(params) => params,
         Err(err) => {
@@ -154,7 +194,13 @@ async fn handle_send(state: &Arc<A2aState>, request: &JsonRpcRequest) -> Respons
         }
     };
 
-    match prepare_and_execute(state, params.message).await {
+    if let Some(config) = &params.push_notification_config {
+        if let Ok(rx) = state.tasks.subscribe(&params.message.message_id).await {
+            spawn_push_notification_worker(params.message.message_id.clone(), rx, config.clone());
+        }
+    }
+
+    match prepare_and_execute(state, params.message, auth_sender).await {
         Ok(task) => rpc_result(request.id.clone(), &task),
         Err((code, message)) => {
             Json(JsonRpcResponse::failure(request.id.clone(), code, message)).into_response()
@@ -164,7 +210,11 @@ async fn handle_send(state: &Arc<A2aState>, request: &JsonRpcRequest) -> Respons
 
 /// Streaming delegation: SSE stream of kind-tagged events ending with
 /// `final: true`.
-async fn handle_stream(state: &Arc<A2aState>, request: &JsonRpcRequest) -> Response {
+async fn handle_stream(
+    state: &Arc<A2aState>,
+    request: &JsonRpcRequest,
+    auth_sender: Option<String>,
+) -> Response {
     let params: SendParams = match serde_json::from_value(request.params.clone()) {
         Ok(params) => params,
         Err(err) => {
@@ -178,7 +228,7 @@ async fn handle_stream(state: &Arc<A2aState>, request: &JsonRpcRequest) -> Respo
     };
 
     let message = params.message;
-    let task = match prepare(state, message.clone()).await {
+    let task = match prepare(state, message.clone(), auth_sender).await {
         Ok(task) => task,
         Err((code, message)) => {
             return Json(JsonRpcResponse::failure(request.id.clone(), code, message))
@@ -197,6 +247,13 @@ async fn handle_stream(state: &Arc<A2aState>, request: &JsonRpcRequest) -> Respo
             .into_response();
         }
     };
+
+    if let Some(config) = params.push_notification_config {
+        if let Ok(push_rx) = state.tasks.subscribe(&task.id).await {
+            spawn_push_notification_worker(task.id.clone(), push_rx, config);
+        }
+    }
+
     let initial = A2aEvent::Task(task.clone());
 
     // Execute the task in the background; events flow through the broadcast.
@@ -208,6 +265,47 @@ async fn handle_stream(state: &Arc<A2aState>, request: &JsonRpcRequest) -> Respo
         }
     });
 
+    let stream = event_stream(receiver, initial);
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
+async fn handle_resubscribe(state: &Arc<A2aState>, request: &JsonRpcRequest) -> Response {
+    let params: ResubscribeParams = match serde_json::from_value(request.params.clone()) {
+        Ok(params) => params,
+        Err(err) => {
+            return Json(JsonRpcResponse::failure(
+                request.id.clone(),
+                error_codes::INVALID_PARAMS,
+                format!("invalid params: {err}"),
+            ))
+            .into_response();
+        }
+    };
+
+    let Some(task) = state.tasks.get(&params.task_id).await else {
+        return Json(JsonRpcResponse::failure(
+            request.id.clone(),
+            error_codes::TASK_NOT_FOUND,
+            format!("task not found: {}", params.task_id),
+        ))
+        .into_response();
+    };
+
+    let receiver = match state.tasks.subscribe(&task.id).await {
+        Ok(receiver) => receiver,
+        Err(err) => {
+            return Json(JsonRpcResponse::failure(
+                request.id.clone(),
+                error_codes::INTERNAL_ERROR,
+                err.to_string(),
+            ))
+            .into_response();
+        }
+    };
+
+    let initial = A2aEvent::Task(task);
     let stream = event_stream(receiver, initial);
     Sse::new(stream)
         .keep_alive(KeepAlive::default())
@@ -272,22 +370,31 @@ async fn handle_cancel(state: &Arc<A2aState>, request: &JsonRpcRequest) -> Respo
 async fn prepare_and_execute(
     state: &Arc<A2aState>,
     message: Message,
+    auth_sender: Option<String>,
 ) -> Result<Task, (i64, String)> {
-    let task = prepare(state, message.clone()).await?;
+    let task = prepare(state, message.clone(), auth_sender).await?;
     execute(state, &task.id, message).await
 }
 
-/// Create the task and run it through governance + audit tap.
-async fn prepare(state: &Arc<A2aState>, message: Message) -> Result<Task, (i64, String)> {
+/// Create the task and run it through schema validation + governance + audit tap.
+async fn prepare(
+    state: &Arc<A2aState>,
+    message: Message,
+    auth_sender: Option<String>,
+) -> Result<Task, (i64, String)> {
+    let intent = extract_intent(&message);
+
+    // M3: Validate JSON Schema if skill declares input_schema
+    validate_input_schema(state, &message, &intent)?;
+
     let task = state
         .tasks
         .create(message.context_id.clone(), Some(message.clone()))
         .await;
 
-    let intent = extract_intent(&message);
     let context = GovernanceContext::new(
         task.id.clone(),
-        None,
+        auth_sender.clone(),
         state.card.name.clone(),
         intent.clone(),
     );
@@ -309,8 +416,90 @@ async fn prepare(state: &Arc<A2aState>, message: Message) -> Result<Task, (i64, 
         return Err((denial.code, denial.message));
     }
 
-    publish_audit_tap(state, &task, &message, &intent).await;
+    publish_audit_tap(state, &task, &message, &intent, auth_sender.as_deref()).await;
     Ok(task)
+}
+
+/// Validate message payload against the target skill's input JSON Schema (M3).
+fn validate_input_schema(
+    state: &Arc<A2aState>,
+    message: &Message,
+    intent: &str,
+) -> Result<(), (i64, String)> {
+    let skill = state.card.skills.iter().find(|s| s.id == intent);
+    let Some(skill) = skill else {
+        return Ok(());
+    };
+    let Some(input_schema) = &skill.input_schema else {
+        return Ok(());
+    };
+
+    let validator = match jsonschema::validator_for(input_schema) {
+        Ok(v) => v,
+        Err(err) => {
+            warn!(skill = %skill.id, error = %err, "invalid JSON schema on skill");
+            return Ok(());
+        }
+    };
+
+    let payload = message
+        .parts
+        .iter()
+        .find_map(|p| match p {
+            Part::Data { data } => Some(data.clone()),
+            Part::Text { text } => serde_json::from_str(text).ok(),
+            _ => None,
+        })
+        .unwrap_or(Value::Null);
+
+    let mut errors = Vec::new();
+    for error in validator.iter_errors(&payload) {
+        errors.push(error.to_string());
+    }
+
+    if !errors.is_empty() {
+        return Err((
+            error_codes::INVALID_PARAMS,
+            format!(
+                "payload failed schema validation for skill '{}': {}",
+                skill.id,
+                errors.join("; ")
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+fn spawn_push_notification_worker(
+    task_id: String,
+    mut receiver: broadcast::Receiver<A2aEvent>,
+    config: PushNotificationConfig,
+) {
+    tokio::spawn(async move {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_default();
+
+        while let Ok(event) = receiver.recv().await {
+            let mut req = client.post(&config.url).json(&event);
+            if let Some(token) = &config.token {
+                req = req.bearer_auth(token);
+            }
+            if let Err(err) = req.send().await {
+                warn!(
+                    task_id = %task_id,
+                    url = %config.url,
+                    error = %err,
+                    "push notification delivery failed"
+                );
+            }
+            if event.is_final() {
+                break;
+            }
+        }
+    });
 }
 
 /// Execute the handler and finalize the task.
@@ -377,12 +566,18 @@ async fn apply_completion(
 }
 
 /// Publish the canonical envelope to the bus (audit/telemetry tap).
-async fn publish_audit_tap(state: &Arc<A2aState>, task: &Task, message: &Message, intent: &str) {
+async fn publish_audit_tap(
+    state: &Arc<A2aState>,
+    task: &Task,
+    message: &Message,
+    intent: &str,
+    auth_sender: Option<&str>,
+) {
     let Some(bus) = &state.bus else {
         return;
     };
     let mut envelope = Envelope::new(
-        "anonymous",
+        auth_sender.unwrap_or("anonymous"),
         state.card.name.clone(),
         intent,
         serde_json::to_value(message).unwrap_or(Value::Null),
@@ -455,7 +650,7 @@ fn event_stream(
 }
 
 #[cfg(test)]
-use agora_core::a2a::{Artifact, Part};
+use agora_core::a2a::{Artifact, MessageRole};
 
 /// A no-op handler for tests: echoes input with an artifact.
 #[cfg(test)]
@@ -564,6 +759,7 @@ mod tests {
         let params = serde_json::to_value(SendParams {
             message: Message::user_text("hello"),
             configuration: None,
+            push_notification_config: None,
         })
         .unwrap();
         let response = rpc(&state, "message/send", params).await;
@@ -585,6 +781,7 @@ mod tests {
         let params = serde_json::to_value(SendParams {
             message: Message::user_text("hello"),
             configuration: None,
+            push_notification_config: None,
         })
         .unwrap();
         let response = rpc(&state, "message/send", params).await;
@@ -608,6 +805,7 @@ mod tests {
         let params = serde_json::to_value(SendParams {
             message: Message::user_text("stream me"),
             configuration: None,
+            push_notification_config: None,
         })
         .unwrap();
         let body = serde_json::to_string(&JsonRpcRequest {
@@ -663,6 +861,7 @@ mod tests {
         let params = serde_json::to_value(SendParams {
             message: Message::user_text("x"),
             configuration: None,
+            push_notification_config: None,
         })
         .unwrap();
         let response = rpc(&state, "message/send", params).await;
@@ -698,5 +897,76 @@ mod tests {
 
         let response = rpc(&state, "message/send", Value::Null).await;
         assert_eq!(response.error.unwrap().code, error_codes::INVALID_PARAMS);
+    }
+
+    #[tokio::test]
+    async fn schema_validation_enforces_input_schema() {
+        let mut state = test_state();
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["query"],
+            "properties": {
+                "query": { "type": "string" }
+            }
+        });
+        let skill = agora_core::a2a::AgentSkill::new("search", "Search").with_input_schema(schema);
+
+        let arc = Arc::get_mut(&mut state).unwrap();
+        arc.card.skills.push(skill);
+
+        // 1. Invalid payload (missing query field) -> -32602
+        let invalid_msg = Message::new(
+            MessageRole::User,
+            vec![Part::data(
+                serde_json::json!({ "intent": "search", "wrong": 123 }),
+            )],
+        );
+        let params = serde_json::to_value(SendParams {
+            message: invalid_msg,
+            configuration: None,
+            push_notification_config: None,
+        })
+        .unwrap();
+        let response = rpc(&state, "message/send", params).await;
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().code, error_codes::INVALID_PARAMS);
+
+        // 2. Valid payload (has query field) -> success
+        let valid_msg = Message::new(
+            MessageRole::User,
+            vec![Part::data(
+                serde_json::json!({ "intent": "search", "query": "rust a2a" }),
+            )],
+        );
+        let params = serde_json::to_value(SendParams {
+            message: valid_msg,
+            configuration: None,
+            push_notification_config: None,
+        })
+        .unwrap();
+        let response = rpc(&state, "message/send", params).await;
+        assert!(response.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn extract_sender_from_headers_works() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(extract_sender_from_headers(&headers), None);
+
+        headers.insert(
+            header::AUTHORIZATION,
+            "Bearer secret-token-123".parse().unwrap(),
+        );
+        assert_eq!(
+            extract_sender_from_headers(&headers),
+            Some("secret-token-123".into())
+        );
+
+        let mut headers2 = HeaderMap::new();
+        headers2.insert("x-api-key", "my-api-key".parse().unwrap());
+        assert_eq!(
+            extract_sender_from_headers(&headers2),
+            Some("my-api-key".into())
+        );
     }
 }

@@ -10,6 +10,9 @@ members = [
     "crates/agora-store",
     "crates/agora-server",
     "crates/agora-sdk",
+    "crates/agora-bus-nats",
+    "crates/agora-cli",
+    "crates/agora-conformance",
     "examples/01-direct-delegate",
 ]
 
@@ -28,6 +31,7 @@ categories = ["network-programming", "asynchronous"]
 agora-core = { path = "crates/agora-core", version = "0.1.0" }
 agora-transport = { path = "crates/agora-transport", version = "0.1.0" }
 agora-bus = { path = "crates/agora-bus", version = "0.1.0" }
+agora-bus-nats = { path = "crates/agora-bus-nats", version = "0.1.0" }
 agora-registry = { path = "crates/agora-registry", version = "0.1.0" }
 agora-governance = { path = "crates/agora-governance", version = "0.1.0" }
 agora-context = { path = "crates/agora-context", version = "0.1.0" }
@@ -53,6 +57,13 @@ tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+jsonschema = "0.28"
+async-nats = "0.38"
+ed25519-dalek = { version = "2", default-features = false, features = ["rand_core", "serde"] }
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets", "serde"] }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+rand = "0.8"
+hex = "0.4"
 
 [profile.release]
 lto = "thin"

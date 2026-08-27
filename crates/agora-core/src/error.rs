@@ -25,6 +25,18 @@ pub enum CoreError {
     #[error("store error: {0}")]
     Store(String),
 
+    /// Schema validation failed.
+    #[error("schema validation failed: {0}")]
+    SchemaValidation(String),
+
+    /// Dead letter queue error.
+    #[error("dead letter queue error: {0}")]
+    DeadLetter(String),
+
+    /// Cryptographic operation failed (signing, verification, encryption, decryption).
+    #[error("crypto error: {0}")]
+    Crypto(String),
+
     /// Serialization/deserialization failure.
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),

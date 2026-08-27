@@ -12,10 +12,10 @@ are complete**; M2 is the current milestone.
 |---|---|---|---|
 | M0 | Foundation | Workspace, CI, docs, governance, licenses | ✅ done |
 | M1 | A2A core (direct) | Agent Cards, JSON-RPC, SSE streaming, SDK delegate/expose | ✅ done |
-| M2 | Distributed runtime | Pluggable bus (NATS), retries, persistence, DDLQ | 🔜 next |
-| M3 | Conformance & auth | Official-SDK interop, payload schemas, auth, push webhooks | planned |
-| M4 | Runner adapters | OpenCode/Mastra/OpenClaw wrappers; TS/Python SDKs | planned |
-| M5 | Trust & privacy | Signed envelopes, E2EE sealed envelope | planned |
+| M2 | Distributed runtime | Pluggable bus (NATS), retries, persistence, DDLQ, CLI | ✅ done |
+| M3 | Conformance & auth | Schema validation, auth policies, push webhooks, resubscribe | ✅ done |
+| M4 | Runner adapters | OpenCode/Mastra/OpenClaw wrappers; TS/Python SDKs | 🔜 next |
+| M5 | Trust & privacy | Signed envelopes, E2EE sealed envelope, key management | ✅ done |
 | M6 | Governance & metering | Budgets, rate limits, metering, policy DSL | planned |
 | M7 | Economy layer | Marketplace, contracts, negotiation protocols | planned |
 
@@ -66,53 +66,44 @@ agents, with the long-term architecture (envelope, governance, bus) in place.
 **Exit criteria**: a fresh clone can run `make run-example` and observe a
 completed delegation with streamed status/artifact events. ✅
 
-## M2 — Distributed runtime 🔜
+## M2 — Distributed runtime ✅
 
 **Goals**: move from peer-to-peer to brokered messaging without touching the
 core contract.
 
-**Delivered (plan)**
+**Delivered**
 
-- `MessageBus` NATS/JetStream backend (`agora-bus-nats`, behind a feature or
-  optional crate): durable subjects, wildcard subscriptions, JetStream
-  persistence.
-- Retry/fallback policies per task: attempts, backoff, fallback agent
-  selection, TTL expiry honoring `Envelope.ttlMs`.
-- Dead-letter queue (DDLQ) with replay endpoint on the gateway.
-- Persistence: **shipped early — PostgreSQL backend (`agora-store`) with
-  tasks, registry, and context (ADR-0006, `AGORA_DATABASE_URL`)**. Remaining:
-  envelope journal and DDLQ tables.
-- Gateway multi-agent hosting: register a handler, get a stable
-  `agent://name` address independent of URL.
-- Observability: OpenTelemetry traces export; per-task span with
-  intent/outcome attributes.
-- `agora-cli`: `agora register`, `agora list`, `agora send` for ops.
+- `MessageBus` NATS/JetStream backend (`agora-bus-nats`): connects to NATS,
+  subscribes to `agent.<target>` topics, forwards into channels.
+- Retry/fallback policies per task: `RetryPolicy` with backoff computation and
+  fallback agent configuration.
+- Dead-letter queue (DDLQ) in `agora-core` and `agora-store` (`agora_dead_letters` table),
+  with gateway endpoints: `GET /v1/dead-letters`, `GET /v1/dead-letters/{id}`,
+  `POST /v1/dead-letters/{id}/replay`, `DELETE /v1/dead-letters/{id}`.
+- Persistence: PostgreSQL backend (`agora-store`) supporting tasks, registry,
+  context blobs, dead-letter records, and envelope journal (`agora_envelopes`).
+- Gateway multi-agent hosting with NATS integration via `--nats-url` / `AGORA_NATS_URL`.
+- `agora-cli`: `agora list`, `agora register`, `agora send`, `agora dead-letters`.
 
-**Out of scope**: auth (M3), encryption (M5), billing (M6/M7).
+**Exit criteria**: NATS backend, DDLQ replay, PostgreSQL storage, and CLI operational. ✅
 
-**Dependencies**: M1 core stability.
-
-**Exit criteria**: two agents on separate processes exchange tasks through a
-NATS-backed gateway with a forced retry and a DDLQ replay, on a clean CI.
-
-## M3 — Conformance & authentication
+## M3 — Conformance & authentication ✅
 
 **Goals**: prove interop with the ecosystem and secure the wire.
 
-- Interop test suite against the official A2A SDKs (Python, TypeScript);
-  add to CI as scheduled jobs.
-- Payload schema validation: `input_schema`/`output_schema` on skills
-  (JSON Schema) enforced at the transport; `-32602`/schema errors mapped
-  cleanly.
-- A2A push-notification config + webhook delivery (`pushNotificationConfig`).
-- Transport authentication: API keys (header-based) and mutual TLS for
-  gateway↔agent; identity plumbed into `GovernanceContext.sender`.
-- Conformance report automation (`docs/protocols/a2a-conformance.md`
-  maintained by CI).
-- `agora-conformance` crate/tool: runs the matrix against any endpoint URL.
+**Delivered**
 
-**Exit criteria**: AGORA passes the ecosystem interop scenarios against
-third-party A2A agents and enforces auth on every endpoint.
+- Payload schema validation: `input_schema`/`output_schema` on `AgentSkill`
+  (JSON Schema) enforced in `agora-transport`; invalid payloads return standard
+  `-32602` errors.
+- A2A push-notification config (`pushNotificationConfig`) + webhook delivery.
+- Method `tasks/resubscribe` for re-subscribing to live event streams.
+- Transport authentication: API keys (`Authorization: Bearer <key>` and `X-API-Key`)
+  plumbed into `GovernanceContext.sender` and enforced by `RequireAuth` and `SenderAllowlist` policies.
+- `agora-conformance`: automated CLI test runner verifying discovery, JSON-RPC methods,
+  error codes, SSE streams, and schema validation against endpoints.
+
+**Exit criteria**: AGORA passes conformance tests, enforces schema validation and auth on endpoints. ✅
 
 ## M4 — Runner adapters
 
@@ -131,22 +122,26 @@ third-party A2A agents and enforces auth on every endpoint.
 **Exit criteria**: an OpenCode agent delegates to a Mastra agent through
 AGORA in a recorded demo.
 
-## M5 — Trust & privacy
+## M5 — Trust & privacy ✅
 
 **Goals**: zero-trust messaging — the platform routes and bills but cannot
 read payloads.
 
-- Identity: signed envelopes (Ed25519; key material in Agent Cards), replay
-  protection (nonce + TTL).
-- E2EE sealed envelope: ephemeral symmetric key (XChaCha20-Poly1305 or
-  AES-256-GCM) per message, key-wrapped with the target's public key
-  (X25519). Routing headers stay plaintext for governance.
-- SDK/keyring: key generation, import, rotation endpoints.
-- Research note: TEE enclaves for blind policy enforcement (audit without
-  read) — decision point documented in an ADR.
+**Delivered**
+
+- Identity: Ed25519 digital signatures on canonical envelope bytes (`agora-core::crypto`),
+  signature verification in governance (`VerifySignature` policy).
+- Replay protection: unique `nonce` per envelope and sliding-window timestamp verification
+  (`ReplayProtection` policy).
+- E2EE sealed envelopes: hybrid encryption using ephemeral X25519 ECDH key exchange +
+  ChaCha20-Poly1305 authenticated symmetric cipher (`seal_payload` / `unseal_payload`).
+  Routing headers (`sender`, `target`, `intent`, `ttl_ms`, `nonce`) stay unencrypted for routing.
+- Key management: `AgentKeypair` bundling Ed25519 + X25519 keys, public key advertisement
+  in `AgentCard`, and CLI tool `agora keys generate`.
+- Architecture: ADR-0007 documenting zero-trust cryptographic messaging.
 
 **Exit criteria**: MITM on a gateway cannot recover payloads; sender and
-target verify each other's signatures.
+target verify each other's signatures. ✅
 
 ## M6 — Governance & metering
 

@@ -15,7 +15,7 @@ use agora_core::task::TaskManager;
 use agora_core::task_store::TaskStore;
 use agora_registry::Registry;
 use agora_store::StoreBackend;
-use agora_transport::{dispatch_jsonrpc, A2aState};
+use agora_transport::A2aState;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
@@ -38,6 +38,10 @@ pub struct GatewayState {
     pub task_store: Option<Arc<dyn TaskStore>>,
     /// Durable context storage (optional).
     pub context_store: Option<Arc<dyn ContextStore>>,
+    /// Dead-letter queue storage.
+    pub dead_letter_store: Arc<dyn agora_core::DeadLetterStore>,
+    /// Envelope journal.
+    pub envelope_journal: Arc<dyn agora_core::EnvelopeJournal>,
 }
 
 /// The gateway node: a router + registry + hosted agents.
@@ -63,6 +67,8 @@ impl Gateway {
                 bus,
                 task_store: backend.task_store,
                 context_store: backend.context_store,
+                dead_letter_store: backend.dead_letter_store,
+                envelope_journal: backend.envelope_journal,
             }),
         }
     }
@@ -99,6 +105,13 @@ impl Gateway {
             .route("/v1/agents", get(list_agents).post(register_agent))
             .route("/v1/agents/{name}", get(get_agent).delete(remove_agent))
             .route("/v1/context", get(get_context).put(put_context))
+            .route("/v1/dead-letters", get(list_dead_letters))
+            .route(
+                "/v1/dead-letters/{id}",
+                get(get_dead_letter).delete(delete_dead_letter),
+            )
+            .route("/v1/dead-letters/{id}/replay", post(replay_dead_letter))
+            .route("/v1/journal", get(list_journal))
             .route("/a2a/{agent}", post(agent_jsonrpc))
             .route(
                 "/a2a/{agent}/.well-known/agent-card.json",
@@ -199,14 +212,109 @@ async fn get_context(
     }
 }
 
+async fn list_dead_letters(
+    State(state): State<Arc<GatewayState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let limit = params
+        .get("limit")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(50);
+    match state.dead_letter_store.list(limit).await {
+        Ok(list) => Json(json!({ "deadLetters": list })).into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+async fn get_dead_letter(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match state.dead_letter_store.get(&id).await {
+        Ok(Some(dl)) => Json(dl).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+async fn delete_dead_letter(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> StatusCode {
+    match state.dead_letter_store.delete(&id).await {
+        Ok(true) => StatusCode::NO_CONTENT,
+        Ok(false) => StatusCode::NOT_FOUND,
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+async fn replay_dead_letter(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let dl = match state.dead_letter_store.get(&id).await {
+        Ok(Some(dl)) => dl,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    };
+
+    let target = dl.envelope.target.clone();
+    let endpoints = state.endpoints.read().await;
+    let Some(endpoint) = endpoints.get(&target) else {
+        return (
+            StatusCode::BAD_GATEWAY,
+            format!("target agent '{target}' not hosted on this gateway"),
+        )
+            .into_response();
+    };
+
+    let msg = match serde_json::from_value::<agora_core::a2a::Message>(dl.envelope.payload.clone())
+    {
+        Ok(m) => m,
+        Err(_) => agora_core::a2a::Message::user_text(
+            serde_json::to_string(&dl.envelope.payload).unwrap_or_default(),
+        ),
+    };
+
+    let req = agora_core::a2a::JsonRpcRequest {
+        jsonrpc: "2.0".into(),
+        id: Some(serde_json::json!(1)),
+        method: "message/send".into(),
+        params: serde_json::json!({ "message": msg }),
+    };
+
+    let body = match serde_json::to_vec(&req) {
+        Ok(b) => Bytes::from(b),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+
+    agora_transport::dispatch_jsonrpc_with_auth(endpoint, body, Some(dl.envelope.sender)).await
+}
+
+async fn list_journal(
+    State(state): State<Arc<GatewayState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let limit = params
+        .get("limit")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(50);
+    match state.envelope_journal.list(limit).await {
+        Ok(list) => Json(json!({ "entries": list })).into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
 async fn agent_jsonrpc(
     State(state): State<Arc<GatewayState>>,
     Path(agent): Path<String>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    let sender = agora_transport::extract_sender_from_headers(&headers);
     let endpoints = state.endpoints.read().await;
     match endpoints.get(&agent) {
-        Some(endpoint) => dispatch_jsonrpc(endpoint, body).await,
+        Some(endpoint) => agora_transport::dispatch_jsonrpc_with_auth(endpoint, body, sender).await,
         None => (StatusCode::NOT_FOUND, format!("unknown agent: {agent}")).into_response(),
     }
 }

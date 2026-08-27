@@ -42,6 +42,18 @@ pub struct Envelope {
     /// Message expiry in the bus; expired envelopes are dropped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_ms: Option<u64>,
+    /// Unique anti-replay nonce (M5).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
+    /// Ed25519 digital signature over canonical envelope bytes (hex encoded, M5).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    /// Sender's Ed25519 public verifying key (hex encoded, M5).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signer_public_key: Option<String>,
+    /// End-to-End Encrypted (E2EE) sealed payload (M5).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sealed: Option<crate::crypto::SealedPayload>,
 }
 
 impl Envelope {
@@ -62,6 +74,10 @@ impl Envelope {
             context_uri: None,
             headers: HashMap::new(),
             ttl_ms: None,
+            nonce: None,
+            signature: None,
+            signer_public_key: None,
+            sealed: None,
         }
     }
 

@@ -33,6 +33,14 @@ pub struct BusSubscription {
 }
 
 impl BusSubscription {
+    /// Create a new bus subscription for an agent from an mpsc receiver.
+    pub fn new(agent: impl Into<String>, receiver: mpsc::Receiver<Envelope>) -> Self {
+        Self {
+            agent: agent.into(),
+            receiver,
+        }
+    }
+
     /// Wait for the next envelope addressed to the subscribed agent.
     pub async fn next(&mut self) -> Option<Envelope> {
         self.receiver.recv().await

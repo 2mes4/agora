@@ -19,14 +19,26 @@
 //! marketplace/economy logic.
 
 pub mod a2a;
+pub mod crypto;
+pub mod dead_letter;
 pub mod envelope;
 pub mod error;
 pub mod handler;
+pub mod journal;
+pub mod retry;
 pub mod task;
 pub mod task_store;
 
+pub use crypto::{
+    canonical_signing_bytes, seal_payload, sign_envelope, unseal_payload,
+    verify_envelope_signature, AgentKeypair, EncryptionPublicKey, EncryptionSecretKey,
+    SealedPayload, SigningKey, VerifyingKey,
+};
+pub use dead_letter::{DeadLetter, DeadLetterStore, InMemoryDeadLetterStore};
 pub use envelope::{AgentId, Envelope};
 pub use error::CoreError;
 pub use handler::{AgentHandler, HandlerError, TaskCompletion, TaskContext};
+pub use journal::{EnvelopeJournal, InMemoryEnvelopeJournal, JournalEntry};
+pub use retry::RetryPolicy;
 pub use task::{TaskManager, TaskSnapshot};
 pub use task_store::TaskStore;

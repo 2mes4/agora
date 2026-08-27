@@ -62,6 +62,12 @@ pub struct AgentSkill {
     pub input_modes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_modes: Option<Vec<String>>,
+    /// JSON Schema for skill input validation (M3).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<Value>,
+    /// JSON Schema for skill output validation (M3).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<Value>,
 }
 
 impl AgentSkill {
@@ -72,6 +78,30 @@ impl AgentSkill {
             name: name.into(),
             ..Self::default()
         }
+    }
+
+    /// Set skill description.
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = Some(desc.into());
+        self
+    }
+
+    /// Set skill tags.
+    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
+        self.tags = tags;
+        self
+    }
+
+    /// Set JSON Schema for input validation.
+    pub fn with_input_schema(mut self, schema: Value) -> Self {
+        self.input_schema = Some(schema);
+        self
+    }
+
+    /// Set JSON Schema for output validation.
+    pub fn with_output_schema(mut self, schema: Value) -> Self {
+        self.output_schema = Some(schema);
+        self
     }
 }
 
@@ -105,6 +135,12 @@ pub struct AgentCard {
     pub authentication: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preferred_transport: Option<String>,
+    /// Ed25519 public verifying key (hex encoded, M5).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub public_key: Option<String>,
+    /// X25519 public encryption key for E2EE (hex encoded, M5).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encryption_key: Option<String>,
 }
 
 impl AgentCard {
@@ -127,6 +163,8 @@ impl AgentCard {
             provider: None,
             authentication: None,
             preferred_transport: None,
+            public_key: None,
+            encryption_key: None,
         }
     }
 
@@ -482,12 +520,26 @@ pub mod error_codes {
     pub const DENIED: i64 = -32004;
 }
 
+/// Configuration for A2A push-notification webhooks (M3).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PushNotificationConfig {
+    /// Webhook URL to deliver task updates to.
+    pub url: String,
+    /// Optional bearer token or secret sent in Authorization header.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+}
+
 /// Parameters of `message/send` and `message/stream`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SendParams {
     pub message: Message,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub configuration: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push_notification_config: Option<PushNotificationConfig>,
 }
 
 /// Parameters of `tasks/get` and `tasks/cancel`.
@@ -497,6 +549,13 @@ pub struct GetTaskParams {
     pub task_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_id: Option<String>,
+}
+
+/// Parameters of `tasks/resubscribe` (M3).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResubscribeParams {
+    pub task_id: String,
 }
 
 #[cfg(test)]

@@ -12,8 +12,10 @@ categories.workspace = true
 
 [dependencies]
 agora-bus = { workspace = true }
+agora-bus-nats = { workspace = true }
 agora-context = { workspace = true }
 agora-core = { workspace = true }
+agora-governance = { workspace = true }
 agora-registry = { workspace = true }
 agora-store = { workspace = true }
 agora-transport = { workspace = true }

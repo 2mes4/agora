@@ -62,6 +62,10 @@ pub struct AgentDefinition {
     pub skills: Vec<SkillDefinition>,
     /// Whether the agent supports streaming (`message/stream`).
     pub streaming: bool,
+    /// Ed25519 public verifying key (hex encoded, M5).
+    pub public_key: Option<String>,
+    /// X25519 public encryption key (hex encoded, M5).
+    pub encryption_key: Option<String>,
 }
 
 impl AgentDefinition {
@@ -79,6 +83,8 @@ impl AgentDefinition {
             url: url.into(),
             skills: Vec::new(),
             streaming: true,
+            public_key: None,
+            encryption_key: None,
         }
     }
 
@@ -91,6 +97,24 @@ impl AgentDefinition {
     /// Disable streaming.
     pub fn without_streaming(mut self) -> Self {
         self.streaming = false;
+        self
+    }
+
+    /// Set public keys from hex strings.
+    pub fn with_keys(
+        mut self,
+        public_key: impl Into<String>,
+        encryption_key: impl Into<String>,
+    ) -> Self {
+        self.public_key = Some(public_key.into());
+        self.encryption_key = Some(encryption_key.into());
+        self
+    }
+
+    /// Set public keys from an AgentKeypair.
+    pub fn with_keypair(mut self, keypair: &agora_core::AgentKeypair) -> Self {
+        self.public_key = Some(keypair.verifying_key().to_hex());
+        self.encryption_key = Some(keypair.encryption_public_key().to_hex());
         self
     }
 
@@ -107,6 +131,8 @@ impl AgentDefinition {
         } else {
             AgentCapabilities::default()
         };
+        card.public_key = self.public_key.clone();
+        card.encryption_key = self.encryption_key.clone();
         card.skills = self
             .skills
             .iter()

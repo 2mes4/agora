@@ -17,6 +17,11 @@ pub struct ServerConfig {
     /// (`postgres://user:password@host:5432/dbname`). When unset, all
     /// storage is in-memory.
     pub database_url: Option<String>,
+    /// NATS message bus URL (`nats://127.0.0.1:4222`). When unset, the
+    /// in-process bus is used.
+    pub nats_url: Option<String>,
+    /// Optional API key for authenticating requests.
+    pub api_key: Option<String>,
     /// Log format: `text` or `json`.
     pub log_format: Option<String>,
 }

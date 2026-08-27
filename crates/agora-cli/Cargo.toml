@@ -1,6 +1,6 @@
 [package]
-name = "agora-transport"
-description = "AGORA A2A server transport: JSON-RPC dispatch and SSE streaming"
+name = "agora-cli"
+description = "Operator CLI for the AGORA platform"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,21 +10,18 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[[bin]]
+name = "agora"
+path = "src/main.rs"
+
 [dependencies]
-agora-bus = { workspace = true }
 agora-core = { workspace = true }
-agora-governance = { workspace = true }
-async-trait = { workspace = true }
-axum = { workspace = true }
-chrono = { workspace = true }
-futures = { workspace = true }
-jsonschema = { workspace = true }
+agora-sdk = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-
-[dev-dependencies]
-tower = { workspace = true }
+tracing-subscriber = { workspace = true }

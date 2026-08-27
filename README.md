@@ -191,6 +191,10 @@ options; CLI flags override file values.
 | `GET/POST /v1/agents` | directory: list / register Agent Cards |
 | `GET/DELETE /v1/agents/{name}` | directory lookup / removal |
 | `GET/PUT /v1/context` | context blobs by `?uri=` / `PUT` raw body → `uri` |
+| `GET /v1/dead-letters` | list dead-letter queue entries |
+| `GET/DELETE /v1/dead-letters/{id}` | get / prune dead-letter record |
+| `POST /v1/dead-letters/{id}/replay`| replay failed message to target agent |
+| `GET /v1/journal` | audit journal of message envelopes |
 | `POST /a2a/{agent}` | A2A JSON-RPC (`message/send`, `message/stream`, …) |
 | `GET /a2a/{agent}/.well-known/agent-card.json` | hosted agent discovery |
 
@@ -200,15 +204,18 @@ options; CLI flags override file values.
 
 | Path | Purpose |
 |---|---|
-| `crates/agora-core` | Canonical envelope, A2A wire model, task lifecycle, handler traits |
-| `crates/agora-transport` | A2A server transport: JSON-RPC + SSE routing |
-| `crates/agora-bus` | `MessageBus` trait + in-process backend (NATS slot ready) |
+| `crates/agora-core` | Canonical envelope, A2A wire model, task lifecycle, handler traits, retries, DDLQ |
+| `crates/agora-transport` | A2A server transport: JSON-RPC + SSE routing, schema validation, auth |
+| `crates/agora-bus` | `MessageBus` trait + in-process backend |
+| `crates/agora-bus-nats` | NATS message bus backend |
 | `crates/agora-registry` | Agent Card registry & discovery |
-| `crates/agora-governance` | Policy chain: auth / budget / audit (hooks live, policies minimal) |
+| `crates/agora-governance` | Policy chain: auth / budget / audit |
 | `crates/agora-context` | Context store for pass-by-reference payloads (`context_uri`) |
-| `crates/agora-store` | PostgreSQL persistence: tasks, registry, context |
+| `crates/agora-store` | PostgreSQL persistence: tasks, registry, context, DDLQ, journal |
 | `crates/agora-server` | Gateway node binary |
 | `crates/agora-sdk` | Rust SDK: `delegate()` / `expose()` / directory client |
+| `crates/agora-cli` | Ops CLI (`agora list`, `agora register`, `agora send`, `agora dead-letters`) |
+| `crates/agora-conformance` | Automated A2A protocol conformance test runner |
 | `examples/` | Runnable end-to-end scenarios |
 | `adapters/`, `sdks/` | Placeholders for runner adapters and TS/Python SDKs (M4) |
 | `docs/` | Architecture, ADRs, protocol conformance, roadmap |
@@ -219,10 +226,10 @@ options; CLI flags override file values.
 |---|---|---|
 | **M0** | Repository foundation: workspace, CI, docs, governance | ✅ done |
 | **M1** | A2A core: Agent Cards, JSON-RPC, SSE streaming, SDK delegate/expose | ✅ done |
-| **M2** | Distributed: pluggable bus (NATS), retries, persistence (SQLite) | next |
-| **M3** | Conformance & interop with official A2A SDKs, auth, payload schema validation | planned |
-| **M4** | Runner adapters (OpenCode, Mastra, OpenClaw…) + TS/Python SDKs | planned |
-| **M5** | Trust: signed envelopes, E2EE sealed envelope | planned |
+| **M2** | Distributed: pluggable bus (NATS), retries, persistence (PostgreSQL), DDLQ, CLI | ✅ done |
+| **M3** | Conformance & auth: schema validation, auth policies, push webhooks, resubscribe | ✅ done |
+| **M4** | Runner adapters (OpenCode, Mastra, OpenClaw…) + TS/Python SDKs | 🔜 next |
+| **M5** | Trust: signed envelopes, E2EE sealed envelope, key management | ✅ done |
 | **M6** | Governance: budgets, rate limits, metering | planned |
 | **M7** | Economy: marketplace, contracts, negotiation protocols | planned |
 
