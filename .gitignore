@@ -7,3 +7,5 @@
 *.swo
 coverage/
 flamegraph.svg
+node_modules/
+dist/

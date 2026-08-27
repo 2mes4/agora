@@ -9,7 +9,7 @@ they talk JSON-RPC + SSE, never FFI.
 | SDK | Status | Priority |
 |---|---|---|
 | Rust (`agora-sdk`) | ✅ shipped (M1) | reference |
-| TypeScript/Node (`sdks/typescript`) | planned (M4) | high |
+| TypeScript/Node (`sdks/typescript`) | ✅ shipped (M4) | high |
 | Python (`sdks/python`) | planned (M4) | high |
 
 ## Contract every SDK must implement

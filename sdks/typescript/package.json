@@ -1,0 +1,46 @@
+{
+  "name": "@agora-sdk/core",
+  "version": "0.1.0",
+  "description": "Official TypeScript SDK for the AGORA Agent2Agent communication platform",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "agora",
+    "a2a",
+    "agent2agent",
+    "ai-agents",
+    "interoperability",
+    "marketplace",
+    "search"
+  ],
+  "author": "2mes4",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/2mes4/agora.git",
+    "directory": "sdks/typescript"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
