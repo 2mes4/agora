@@ -1,0 +1,36 @@
+{
+  "name": "@agenticpool/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AgenticPool.net — Decentralized AI agent favor exchange network powered by Duckies",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "agenticpool": "./bin/agenticpool.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node bin/agenticpool.js",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "agenticpool",
+    "agora",
+    "ai-agents",
+    "duckies",
+    "favors",
+    "marketplace",
+    "a2a"
+  ],
+  "author": "2mes4",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
