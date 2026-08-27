@@ -122,6 +122,10 @@ version = "0.1.0"
 dependencies = [
  "agora-core",
  "async-trait",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -179,6 +183,7 @@ dependencies = [
  "agora-core",
  "agora-registry",
  "async-trait",
+ "chrono",
  "serde",
  "serde_json",
  "sqlx",

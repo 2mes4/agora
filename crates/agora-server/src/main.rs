@@ -45,6 +45,18 @@ struct Cli {
     #[arg(long, env = "AGORA_API_KEY")]
     api_key: Option<String>,
 
+    /// Llull Search Engine URL (e.g. http://127.0.0.1:8080).
+    #[arg(long, env = "AGORA_LLULL_URL")]
+    llull_url: Option<String>,
+
+    /// Optional auth token for Llull Search Engine.
+    #[arg(long, env = "AGORA_LLULL_TOKEN")]
+    llull_token: Option<String>,
+
+    /// Llull index name for services (defaults to agora_services).
+    #[arg(long, env = "AGORA_LLULL_INDEX")]
+    llull_index: Option<String>,
+
     /// Path to a TOML configuration file (see config/server.example.toml).
     #[arg(long)]
     config: Option<PathBuf>,
@@ -83,7 +95,20 @@ async fn main() -> anyhow::Result<()> {
         None => Arc::new(agora_bus::InProcessBus::new()),
     };
 
-    let gateway = Gateway::with_backend(bus, backend);
+    let llull = effective.llull_url.as_deref().map(|url| {
+        let index = effective
+            .llull_index
+            .clone()
+            .unwrap_or_else(|| "agora_services".to_string());
+        info!(url, index = %index, "connected to Llull Search Engine bridge");
+        Arc::new(agora_registry::LlullClient::new(
+            url,
+            effective.llull_token.clone(),
+            index,
+        ))
+    });
+
+    let gateway = Gateway::with_options(bus, backend, llull);
 
     let port = effective
         .bind
@@ -122,6 +147,9 @@ fn resolve(cli: Cli, file: ServerConfig) -> EffectiveConfig {
         database_url: cli.database_url.or(file.database_url),
         nats_url: cli.nats_url.or(file.nats_url),
         api_key: cli.api_key.or(file.api_key),
+        llull_url: cli.llull_url.or(file.llull_url),
+        llull_token: cli.llull_token.or(file.llull_token),
+        llull_index: cli.llull_index.or(file.llull_index),
         log_format: cli.log_format,
     }
 }
@@ -134,6 +162,9 @@ struct EffectiveConfig {
     nats_url: Option<String>,
     #[allow(dead_code)]
     api_key: Option<String>,
+    llull_url: Option<String>,
+    llull_token: Option<String>,
+    llull_index: Option<String>,
     log_format: String,
 }
 

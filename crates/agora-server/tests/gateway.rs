@@ -255,3 +255,137 @@ async fn dead_letters_api_and_replay() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
 }
+
+#[tokio::test]
+async fn agent_heartbeat_and_presence() {
+    let gateway = gateway().await;
+    let app = gateway.router();
+
+    // 1. Initial status
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/agents/echo/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["agentName"], "echo");
+    assert_eq!(body["isOnline"], true);
+
+    // 2. Send heartbeat with status "busy"
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/agents/echo/heartbeat")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "status": "busy" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["status"], "busy");
+    assert_eq!(body["isOnline"], true);
+}
+
+#[tokio::test]
+async fn services_marketplace_and_search() {
+    let gateway = Gateway::new();
+    let app = gateway.router();
+
+    // 1. Register agent with a paid service
+    let card = json!({
+        "name": "transcription_bot",
+        "url": "http://transcribe.example:7100",
+        "version": "0.1.0",
+        "services": [
+            {
+                "id": "audio.whisper_v3",
+                "name": "Whisper V3 Speech-to-Text",
+                "description": "High accuracy multi-language audio transcription",
+                "tags": ["audio", "speech", "transcription"],
+                "pricing": {
+                    "amount": 0.05,
+                    "currency": "EUR",
+                    "model": "per_call"
+                }
+            }
+        ]
+    });
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/agents")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(card.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    // 2. List all marketplace services
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/services")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let services = body["services"].as_array().unwrap();
+    assert_eq!(services.len(), 1);
+    assert_eq!(services[0]["service"]["id"], "audio.whisper_v3");
+    assert_eq!(services[0]["service"]["pricing"]["amount"], 0.05);
+    assert_eq!(services[0]["presence"]["isOnline"], true);
+
+    // 3. Find providers by service ID
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/services/audio.whisper_v3")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["providers"].as_array().unwrap().len(), 1);
+
+    // 4. Search services query
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/services/search?q=speech&online_only=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["hits"].as_array().unwrap().len(), 1);
+    assert_eq!(body["hits"][0]["service"]["id"], "audio.whisper_v3");
+}

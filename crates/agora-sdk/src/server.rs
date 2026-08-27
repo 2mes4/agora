@@ -46,6 +46,59 @@ impl SkillDefinition {
     }
 }
 
+/// A declarable marketplace service for an [`AgentDefinition`].
+#[derive(Debug, Clone)]
+pub struct ServiceDefinition {
+    /// Unique identifier of the service, e.g. `video_generation.nature_hd`.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Optional description.
+    pub description: Option<String>,
+    /// Search tags.
+    pub tags: Vec<String>,
+    /// Pricing specification.
+    pub pricing: agora_core::a2a::ServicePricing,
+    /// Associated skill id (optional).
+    pub skill_id: Option<String>,
+}
+
+impl ServiceDefinition {
+    /// Build a service with id, name, and pricing.
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        pricing: agora_core::a2a::ServicePricing,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            description: None,
+            tags: Vec::new(),
+            pricing,
+            skill_id: None,
+        }
+    }
+
+    /// Add a description.
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Add tags.
+    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.tags = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Associate with a skill.
+    pub fn with_skill(mut self, skill_id: impl Into<String>) -> Self {
+        self.skill_id = Some(skill_id.into());
+        self
+    }
+}
+
 /// What an agent is and where it lives.
 #[derive(Debug, Clone)]
 pub struct AgentDefinition {
@@ -60,6 +113,8 @@ pub struct AgentDefinition {
     pub url: String,
     /// Declared skills.
     pub skills: Vec<SkillDefinition>,
+    /// Declared marketplace services.
+    pub services: Vec<ServiceDefinition>,
     /// Whether the agent supports streaming (`message/stream`).
     pub streaming: bool,
     /// Ed25519 public verifying key (hex encoded, M5).
@@ -82,6 +137,7 @@ impl AgentDefinition {
             version: version.into(),
             url: url.into(),
             skills: Vec::new(),
+            services: Vec::new(),
             streaming: true,
             public_key: None,
             encryption_key: None,
@@ -91,6 +147,12 @@ impl AgentDefinition {
     /// Add a skill.
     pub fn with_skill(mut self, skill: SkillDefinition) -> Self {
         self.skills.push(skill);
+        self
+    }
+
+    /// Add a marketplace service.
+    pub fn with_service(mut self, service: ServiceDefinition) -> Self {
+        self.services.push(service);
         self
     }
 
@@ -142,6 +204,19 @@ impl AgentDefinition {
                 description: skill.description.clone(),
                 tags: skill.tags.clone(),
                 ..AgentSkill::default()
+            })
+            .collect();
+        card.services = self
+            .services
+            .iter()
+            .map(|svc| agora_core::a2a::AgentService {
+                id: svc.id.clone(),
+                name: svc.name.clone(),
+                description: svc.description.clone(),
+                tags: svc.tags.clone(),
+                pricing: svc.pricing.clone(),
+                skill_id: svc.skill_id.clone(),
+                ..agora_core::a2a::AgentService::default()
             })
             .collect();
         card
@@ -245,5 +320,33 @@ mod tests {
         assert_eq!(card.skills.len(), 1);
         assert_eq!(card.skills[0].id, "video_generation.nature");
         assert_eq!(card.skills[0].tags, vec!["video"]);
+    }
+
+    #[test]
+    fn definition_to_card_maps_services() {
+        let definition = AgentDefinition::new(
+            "render-agent",
+            "renders graphics",
+            "0.1.0",
+            "http://127.0.0.1:7102",
+        )
+        .with_service(
+            ServiceDefinition::new(
+                "render_4k",
+                "4K Render Service",
+                agora_core::a2a::ServicePricing::per_call(15.5, "USD"),
+            )
+            .with_description("Renders 4K scenes")
+            .with_tags(["render", "4k", "graphics"])
+            .with_skill("graphics.render"),
+        );
+        let card = definition.to_card();
+        assert_eq!(card.services.len(), 1);
+        let svc = &card.services[0];
+        assert_eq!(svc.id, "render_4k");
+        assert_eq!(svc.name, "4K Render Service");
+        assert_eq!(svc.pricing.amount, 15.5);
+        assert_eq!(svc.pricing.currency, "USD");
+        assert_eq!(svc.skill_id.as_deref(), Some("graphics.render"));
     }
 }

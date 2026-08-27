@@ -105,13 +105,126 @@ impl AgentSkill {
     }
 }
 
+fn default_currency() -> String {
+    "EUR".to_string()
+}
+
+fn default_pricing_model() -> String {
+    "per_call".to_string()
+}
+
+/// Pricing specification for an agent service.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ServicePricing {
+    /// Price amount (can be 0.0 for free services).
+    pub amount: f64,
+    /// Currency or token identifier (e.g. "EUR", "USD", "TOKEN").
+    #[serde(default = "default_currency")]
+    pub currency: String,
+    /// Pricing model: "per_call", "per_minute", "per_token", "subscription", "free".
+    #[serde(default = "default_pricing_model")]
+    pub model: String,
+}
+
+impl Default for ServicePricing {
+    fn default() -> Self {
+        Self {
+            amount: 0.0,
+            currency: default_currency(),
+            model: default_pricing_model(),
+        }
+    }
+}
+
+impl ServicePricing {
+    /// Create a free pricing model.
+    pub fn free() -> Self {
+        Self {
+            amount: 0.0,
+            currency: default_currency(),
+            model: "free".to_string(),
+        }
+    }
+
+    /// Create a fixed price per call.
+    pub fn per_call(amount: f64, currency: impl Into<String>) -> Self {
+        Self {
+            amount,
+            currency: currency.into(),
+            model: "per_call".to_string(),
+        }
+    }
+}
+
+/// A specific paid or free service offered by an agent in the marketplace.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentService {
+    /// Unique identifier of the service, e.g. `video_generation.nature_hd`.
+    pub id: String,
+    /// Display name of the service.
+    pub name: String,
+    /// Detailed description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Search and discovery tags.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// Pricing specification.
+    #[serde(default)]
+    pub pricing: ServicePricing,
+    /// Associated skill id (if backed by a skill in AgentCard.skills).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_id: Option<String>,
+    /// JSON Schema for service input parameters (optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<Value>,
+    /// JSON Schema for service output response (optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<Value>,
+    /// Custom metadata (SLA, provider info, etc.).
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub metadata: serde_json::Map<String, Value>,
+}
+
+impl AgentService {
+    /// Build a service with id, name, and pricing.
+    pub fn new(id: impl Into<String>, name: impl Into<String>, pricing: ServicePricing) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            pricing,
+            ..Self::default()
+        }
+    }
+
+    /// Add a description.
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = Some(desc.into());
+        self
+    }
+
+    /// Add tags.
+    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.tags = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Link with an AgentSkill id.
+    pub fn with_skill_id(mut self, skill_id: impl Into<String>) -> Self {
+        self.skill_id = Some(skill_id.into());
+        self
+    }
+}
+
 fn default_modes() -> Vec<String> {
     vec!["application/json".to_string(), "text/plain".to_string()]
 }
 
 /// The public discovery manifest of an agent (A2A Agent Card), served at
 /// `/.well-known/agent-card.json`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCard {
     pub name: String,
@@ -128,6 +241,9 @@ pub struct AgentCard {
     pub default_output_modes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<AgentSkill>,
+    /// Services offered by this agent in the marketplace (0..n).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub services: Vec<AgentService>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<AgentProvider>,
     /// Authentication requirements; enforced from M3.
@@ -160,6 +276,7 @@ impl AgentCard {
             default_input_modes: default_modes(),
             default_output_modes: default_modes(),
             skills: Vec::new(),
+            services: Vec::new(),
             provider: None,
             authentication: None,
             preferred_transport: None,
@@ -171,6 +288,17 @@ impl AgentCard {
     /// The identifiers of all declared skills.
     pub fn skill_ids(&self) -> impl Iterator<Item = &str> {
         self.skills.iter().map(|s| s.id.as_str())
+    }
+
+    /// The identifiers of all declared services.
+    pub fn service_ids(&self) -> impl Iterator<Item = &str> {
+        self.services.iter().map(|s| s.id.as_str())
+    }
+
+    /// Add a service to the card.
+    pub fn with_service(mut self, service: AgentService) -> Self {
+        self.services.push(service);
+        self
     }
 }
 
@@ -614,5 +742,31 @@ mod tests {
         assert_eq!(json.get("kind").unwrap(), "status-update");
         assert_eq!(json.get("final").unwrap(), true);
         assert!(ev.is_final());
+    }
+
+    #[test]
+    fn card_services_round_trip() {
+        let mut card = AgentCard::new(
+            "transcriber",
+            Some("Audio services".into()),
+            "http://x",
+            "0.1.0",
+        );
+        let service = AgentService::new(
+            "audio.transcribe_pro",
+            "Whisper Pro Transcription",
+            ServicePricing::per_call(0.05, "EUR"),
+        )
+        .with_description("High accuracy multi-language speech transcription")
+        .with_tags(["audio", "whisper", "transcription"]);
+
+        card = card.with_service(service);
+
+        let json = serde_json::to_value(&card).unwrap();
+        assert!(json.get("services").is_some());
+        let back: AgentCard = serde_json::from_value(json).unwrap();
+        assert_eq!(back.service_ids().next(), Some("audio.transcribe_pro"));
+        assert_eq!(back.services[0].pricing.amount, 0.05);
+        assert_eq!(back.services[0].pricing.currency, "EUR");
     }
 }

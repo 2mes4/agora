@@ -15,6 +15,7 @@ agora-context = { workspace = true }
 agora-core = { workspace = true }
 agora-registry = { workspace = true }
 async-trait = { workspace = true }
+chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "json", "chrono"] }

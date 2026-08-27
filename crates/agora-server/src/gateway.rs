@@ -42,6 +42,8 @@ pub struct GatewayState {
     pub dead_letter_store: Arc<dyn agora_core::DeadLetterStore>,
     /// Envelope journal.
     pub envelope_journal: Arc<dyn agora_core::EnvelopeJournal>,
+    /// Llull Search Engine bridge client (optional).
+    pub llull: Option<Arc<agora_registry::LlullClient>>,
 }
 
 /// The gateway node: a router + registry + hosted agents.
@@ -60,6 +62,15 @@ impl Gateway {
 
     /// Create a gateway with a custom bus and storage backend.
     pub fn with_backend(bus: Arc<dyn MessageBus>, backend: StoreBackend) -> Self {
+        Self::with_options(bus, backend, None)
+    }
+
+    /// Create a gateway with bus, backend, and optional Llull search client.
+    pub fn with_options(
+        bus: Arc<dyn MessageBus>,
+        backend: StoreBackend,
+        llull: Option<Arc<agora_registry::LlullClient>>,
+    ) -> Self {
         Self {
             state: Arc::new(GatewayState {
                 registry: backend.registry,
@@ -69,6 +80,7 @@ impl Gateway {
                 context_store: backend.context_store,
                 dead_letter_store: backend.dead_letter_store,
                 envelope_journal: backend.envelope_journal,
+                llull,
             }),
         }
     }
@@ -87,7 +99,14 @@ impl Gateway {
         if let Err(err) = state.hydrate().await {
             warn!(agent = %card.name, error = %err, "task hydration failed");
         }
-        let _ = self.state.registry.register(card).await;
+        let _ = self.state.registry.register(card.clone()).await;
+
+        if let Some(llull) = &self.state.llull {
+            for service in &card.services {
+                let _ = llull.index_service(&card, service, true).await;
+            }
+        }
+
         let name = state.card.name.clone();
         let mut endpoints = self.state.endpoints.write().await;
         endpoints.insert(name, state);
@@ -104,6 +123,11 @@ impl Gateway {
             .route("/health", get(health))
             .route("/v1/agents", get(list_agents).post(register_agent))
             .route("/v1/agents/{name}", get(get_agent).delete(remove_agent))
+            .route("/v1/agents/{name}/heartbeat", post(heartbeat_agent))
+            .route("/v1/agents/{name}/status", get(get_agent_status))
+            .route("/v1/services", get(list_services))
+            .route("/v1/services/{service_id}", get(get_service_providers))
+            .route("/v1/services/search", get(search_services))
             .route("/v1/context", get(get_context).put(put_context))
             .route("/v1/dead-letters", get(list_dead_letters))
             .route(
@@ -144,7 +168,14 @@ async fn register_agent(
         return (StatusCode::BAD_REQUEST, "agent name is required").into_response();
     }
     match state.registry.register(card.clone()).await {
-        Ok(()) => (StatusCode::CREATED, Json(card)).into_response(),
+        Ok(()) => {
+            if let Some(llull) = &state.llull {
+                for service in &card.services {
+                    let _ = llull.index_service(&card, service, true).await;
+                }
+            }
+            (StatusCode::CREATED, Json(card)).into_response()
+        }
         Err(err) => (StatusCode::CONFLICT, err.to_string()).into_response(),
     }
 }
@@ -162,8 +193,251 @@ async fn remove_agent(
 ) -> StatusCode {
     let mut endpoints = state.endpoints.write().await;
     endpoints.remove(&name);
+    if let Some(card) = state.registry.get(&name).await {
+        if let Some(llull) = &state.llull {
+            let _ = llull.delete_agent_services(&name, &card.services).await;
+        }
+    }
     state.registry.unregister(&name).await;
     StatusCode::NO_CONTENT
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct HeartbeatPayload {
+    status: Option<agora_registry::AgentStatus>,
+}
+
+async fn heartbeat_agent(
+    State(state): State<Arc<GatewayState>>,
+    Path(name): Path<String>,
+    payload: Option<Json<HeartbeatPayload>>,
+) -> Response {
+    let status = payload.and_then(|Json(p)| p.status);
+    match state.registry.heartbeat(&name, status).await {
+        Ok(presence) => {
+            if let Some(llull) = &state.llull {
+                if let Some(card) = state.registry.get(&name).await {
+                    for service in &card.services {
+                        let _ = llull
+                            .index_service(&card, service, presence.is_online)
+                            .await;
+                    }
+                }
+            }
+            Json(presence).into_response()
+        }
+        Err(agora_registry::RegistryError::NotFound(_)) => StatusCode::NOT_FOUND.into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+async fn get_agent_status(
+    State(state): State<Arc<GatewayState>>,
+    Path(name): Path<String>,
+) -> Response {
+    match state.registry.get_presence(&name).await {
+        Some(presence) => Json(presence).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn list_services(
+    State(state): State<Arc<GatewayState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let online_only = params
+        .get("online_only")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+    let mut services = state.registry.list_services().await;
+    if online_only {
+        services.retain(|s| s.presence.is_online);
+    }
+    Json(json!({ "services": services })).into_response()
+}
+
+async fn get_service_providers(
+    State(state): State<Arc<GatewayState>>,
+    Path(service_id): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let online_only = params
+        .get("online_only")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+    let mut providers = state.registry.find_by_service(&service_id).await;
+    if online_only {
+        providers.retain(|p| p.presence.is_online);
+    }
+    Json(json!({
+        "serviceId": service_id,
+        "providers": providers
+    }))
+    .into_response()
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SearchQueryParams {
+    q: Option<String>,
+    online_only: Option<bool>,
+    max_price: Option<f64>,
+    currency: Option<String>,
+    page: Option<usize>,
+    hits_per_page: Option<usize>,
+}
+
+async fn search_services(
+    State(state): State<Arc<GatewayState>>,
+    Query(params): Query<SearchQueryParams>,
+) -> Response {
+    let query = params.q.unwrap_or_default();
+    let online_only = params.online_only.unwrap_or(false);
+    let page = params.page.unwrap_or(1);
+    let hits_per_page = params.hits_per_page.unwrap_or(20);
+
+    if let Some(llull) = &state.llull {
+        match llull.search(&query, page, hits_per_page).await {
+            Ok(llull_resp) => {
+                let mut enriched_hits = Vec::new();
+                for hit in llull_resp.hits {
+                    let agent_name = hit
+                        .fields
+                        .get("agent_name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let service_id = hit
+                        .fields
+                        .get("service_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let presence = state
+                        .registry
+                        .get_presence(agent_name)
+                        .await
+                        .unwrap_or_else(|| agora_registry::AgentPresence {
+                            agent_name: agent_name.to_string(),
+                            status: agora_registry::AgentStatus::Offline,
+                            last_seen: chrono::Utc::now(),
+                            is_online: false,
+                        });
+
+                    if online_only && !presence.is_online {
+                        continue;
+                    }
+
+                    let price = hit
+                        .fields
+                        .get("price")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0);
+                    if let Some(max_p) = params.max_price {
+                        if price > max_p {
+                            continue;
+                        }
+                    }
+
+                    if let Some(curr) = &params.currency {
+                        let hit_curr = hit
+                            .fields
+                            .get("currency")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        if !hit_curr.eq_ignore_ascii_case(curr) {
+                            continue;
+                        }
+                    }
+
+                    enriched_hits.push(json!({
+                        "id": hit.id,
+                        "score": hit.score,
+                        "agentName": agent_name,
+                        "serviceId": service_id,
+                        "presence": presence,
+                        "fields": hit.fields,
+                    }));
+                }
+
+                return Json(json!({
+                    "engine": "llull",
+                    "query": query,
+                    "page": llull_resp.page,
+                    "totalHits": enriched_hits.len(),
+                    "hits": enriched_hits,
+                }))
+                .into_response();
+            }
+            Err(err) => {
+                warn!(error = %err, "llull search failed, falling back to local registry search");
+            }
+        }
+    }
+
+    // Fallback search when Llull is unset or unreachable
+    let all_services = state.registry.list_services().await;
+    let query_lower = query.to_lowercase();
+    let matching: Vec<_> = all_services
+        .into_iter()
+        .filter(|listing| {
+            if online_only && !listing.presence.is_online {
+                return false;
+            }
+            if let Some(max_p) = params.max_price {
+                if listing.service.pricing.amount > max_p {
+                    return false;
+                }
+            }
+            if let Some(curr) = &params.currency {
+                if !listing.service.pricing.currency.eq_ignore_ascii_case(curr) {
+                    return false;
+                }
+            }
+            if query_lower.is_empty() {
+                return true;
+            }
+            listing.service.name.to_lowercase().contains(&query_lower)
+                || listing.service.id.to_lowercase().contains(&query_lower)
+                || listing
+                    .service
+                    .description
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains(&query_lower)
+                || listing
+                    .service
+                    .tags
+                    .iter()
+                    .any(|t| t.to_lowercase().contains(&query_lower))
+                || listing.agent_name.to_lowercase().contains(&query_lower)
+        })
+        .map(|listing| {
+            json!({
+                "id": format!("{}:{}", listing.agent_name, listing.service.id),
+                "score": 1.0,
+                "agentName": listing.agent_name,
+                "agentUrl": listing.agent_url,
+                "service": listing.service,
+                "presence": listing.presence,
+            })
+        })
+        .collect();
+
+    let total = matching.len();
+    let offset = (page.saturating_sub(1)) * hits_per_page;
+    let paged_hits: Vec<_> = matching
+        .into_iter()
+        .skip(offset)
+        .take(hits_per_page)
+        .collect();
+
+    Json(json!({
+        "engine": "local_fallback",
+        "query": query,
+        "page": page,
+        "totalHits": total,
+        "hits": paged_hits,
+    }))
+    .into_response()
 }
 
 /// Store a context blob; returns its `context_uri` (pass-by-reference).

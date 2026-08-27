@@ -53,6 +53,44 @@ enum Commands {
         #[command(subcommand)]
         action: KeysAction,
     },
+    /// Send a heartbeat for an agent to update presence
+    Heartbeat {
+        /// Agent name
+        name: String,
+        /// Optional status: online, busy, offline
+        #[arg(long)]
+        status: Option<String>,
+    },
+    /// Discover and search marketplace services
+    Services {
+        #[command(subcommand)]
+        action: ServicesAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServicesAction {
+    /// List all marketplace services
+    List {
+        #[arg(long)]
+        online_only: bool,
+    },
+    /// Find agents offering a specific service ID
+    Get {
+        id: String,
+        #[arg(long)]
+        online_only: bool,
+    },
+    /// Search services via Llull Search Engine bridge
+    Search {
+        query: String,
+        #[arg(long)]
+        online_only: bool,
+        #[arg(long)]
+        max_price: Option<f64>,
+        #[arg(long)]
+        currency: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -185,6 +223,72 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}", serde_json::to_string_pretty(&output)?);
             }
         },
+        Commands::Heartbeat { name, status } => {
+            let client = reqwest::Client::new();
+            let mut req = client.post(format!("{}/v1/agents/{name}/heartbeat", cli.gateway));
+            if let Some(key) = &cli.api_key {
+                req = req.bearer_auth(key);
+            }
+            if let Some(s) = status {
+                req = req.json(&serde_json::json!({ "status": s }));
+            }
+            let res = req.send().await?;
+            let body: serde_json::Value = res.json().await?;
+            println!("{}", serde_json::to_string_pretty(&body)?);
+        }
+        Commands::Services { action } => {
+            let client = reqwest::Client::new();
+            match action {
+                ServicesAction::List { online_only } => {
+                    let mut req = client.get(format!(
+                        "{}/v1/services?online_only={online_only}",
+                        cli.gateway
+                    ));
+                    if let Some(key) = &cli.api_key {
+                        req = req.bearer_auth(key);
+                    }
+                    let res = req.send().await?;
+                    let body: serde_json::Value = res.json().await?;
+                    println!("{}", serde_json::to_string_pretty(&body)?);
+                }
+                ServicesAction::Get { id, online_only } => {
+                    let mut req = client.get(format!(
+                        "{}/v1/services/{id}?online_only={online_only}",
+                        cli.gateway
+                    ));
+                    if let Some(key) = &cli.api_key {
+                        req = req.bearer_auth(key);
+                    }
+                    let res = req.send().await?;
+                    let body: serde_json::Value = res.json().await?;
+                    println!("{}", serde_json::to_string_pretty(&body)?);
+                }
+                ServicesAction::Search {
+                    query,
+                    online_only,
+                    max_price,
+                    currency,
+                } => {
+                    let mut query_params: Vec<(&str, String)> =
+                        vec![("q", query), ("online_only", online_only.to_string())];
+                    if let Some(max_p) = max_price {
+                        query_params.push(("max_price", max_p.to_string()));
+                    }
+                    if let Some(curr) = currency {
+                        query_params.push(("currency", curr));
+                    }
+                    let mut req = client
+                        .get(format!("{}/v1/services/search", cli.gateway))
+                        .query(&query_params);
+                    if let Some(key) = &cli.api_key {
+                        req = req.bearer_auth(key);
+                    }
+                    let res = req.send().await?;
+                    let body: serde_json::Value = res.json().await?;
+                    println!("{}", serde_json::to_string_pretty(&body)?);
+                }
+            }
+        }
     }
 
     Ok(())

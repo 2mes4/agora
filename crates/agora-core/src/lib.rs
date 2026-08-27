@@ -29,6 +29,10 @@ pub mod retry;
 pub mod task;
 pub mod task_store;
 
+pub use a2a::{
+    AgentCapabilities, AgentCard, AgentProvider, AgentService, AgentSkill, Message, MessageRole,
+    Part, ServicePricing, Task, TaskState,
+};
 pub use crypto::{
     canonical_signing_bytes, seal_payload, sign_envelope, unseal_payload,
     verify_envelope_signature, AgentKeypair, EncryptionPublicKey, EncryptionSecretKey,

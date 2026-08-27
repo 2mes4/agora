@@ -22,6 +22,12 @@ pub struct ServerConfig {
     pub nats_url: Option<String>,
     /// Optional API key for authenticating requests.
     pub api_key: Option<String>,
+    /// Optional URL for Llull Search Engine (`http://127.0.0.1:8080`).
+    pub llull_url: Option<String>,
+    /// Optional auth token for Llull Search Engine.
+    pub llull_token: Option<String>,
+    /// Llull index name for services (defaults to `agora_services`).
+    pub llull_index: Option<String>,
     /// Log format: `text` or `json`.
     pub log_format: Option<String>,
 }

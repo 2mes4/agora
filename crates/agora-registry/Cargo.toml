@@ -13,5 +13,9 @@ categories.workspace = true
 [dependencies]
 agora-core = { workspace = true }
 async-trait = { workspace = true }
+chrono = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

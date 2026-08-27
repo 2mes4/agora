@@ -20,8 +20,11 @@ use agora_context::{ContextBlob, ContextError, ContextStore};
 use agora_core::a2a::{AgentCard, Task};
 use agora_core::error::CoreError;
 use agora_core::task_store::TaskStore;
-use agora_registry::{InMemoryRegistry, Registry, RegistryError};
+use agora_registry::{
+    AgentPresence, AgentStatus, InMemoryRegistry, Registry, RegistryError, ServiceListing,
+};
 use async_trait::async_trait;
+use chrono::{DateTime, Duration, Utc};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::types::Json;
 use sqlx::Row;
@@ -73,11 +76,25 @@ impl PostgresStore {
             "CREATE TABLE IF NOT EXISTS agora_agents (
                 name TEXT PRIMARY KEY,
                 card JSONB NOT NULL,
+                status TEXT NOT NULL DEFAULT 'offline',
+                last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )",
         )
         .execute(&pool)
         .await?;
+
+        let _ = sqlx::query(
+            "ALTER TABLE agora_agents ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'offline'",
+        )
+        .execute(&pool)
+        .await;
+
+        let _ = sqlx::query(
+            "ALTER TABLE agora_agents ADD COLUMN IF NOT EXISTS last_seen TIMESTAMPTZ NOT NULL DEFAULT now()",
+        )
+        .execute(&pool)
+        .await;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS agora_context (
@@ -108,7 +125,7 @@ impl PostgresStore {
                 id TEXT PRIMARY KEY,
                 envelope JSONB NOT NULL,
                 status TEXT NOT NULL,
-                recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )",
         )
         .execute(&pool)
@@ -117,7 +134,7 @@ impl PostgresStore {
         Ok(Self { pool })
     }
 
-    /// The underlying connection pool.
+    /// Access the underlying connection pool.
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }
@@ -167,9 +184,9 @@ impl Registry for PostgresStore {
         let value =
             serde_json::to_value(&card).map_err(|err| RegistryError::Database(err.to_string()))?;
         sqlx::query(
-            "INSERT INTO agora_agents (name, card, updated_at)
-             VALUES ($1, $2::jsonb, now())
-             ON CONFLICT (name) DO UPDATE SET card = $2, updated_at = now()",
+            "INSERT INTO agora_agents (name, card, status, last_seen, updated_at)
+             VALUES ($1, $2::jsonb, 'online', now(), now())
+             ON CONFLICT (name) DO UPDATE SET card = $2, status = 'online', last_seen = now(), updated_at = now()",
         )
         .bind(&card.name)
         .bind(Json(value))
@@ -213,6 +230,168 @@ impl Registry for PostgresStore {
             .into_iter()
             .filter(|card| card.skill_ids().any(|id| id == skill_id))
             .collect()
+    }
+
+    async fn heartbeat(
+        &self,
+        name: &str,
+        status: Option<AgentStatus>,
+    ) -> Result<AgentPresence, RegistryError> {
+        let status_str = match status {
+            Some(AgentStatus::Online) => "online",
+            Some(AgentStatus::Busy) => "busy",
+            Some(AgentStatus::Offline) => "offline",
+            None => "online",
+        };
+
+        let row = sqlx::query(
+            "UPDATE agora_agents
+             SET status = $2, last_seen = now(), updated_at = now()
+             WHERE name = $1
+             RETURNING name, status, last_seen",
+        )
+        .bind(name)
+        .bind(status_str)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| RegistryError::Database(err.to_string()))?;
+
+        let Some(row) = row else {
+            return Err(RegistryError::NotFound(name.to_string()));
+        };
+
+        let status_val: String = row.try_get("status").unwrap_or_else(|_| "offline".into());
+        let last_seen: DateTime<Utc> = row.try_get("last_seen").unwrap_or_else(|_| Utc::now());
+
+        let st = match status_val.as_str() {
+            "online" => AgentStatus::Online,
+            "busy" => AgentStatus::Busy,
+            _ => AgentStatus::Offline,
+        };
+
+        let is_online = st != AgentStatus::Offline
+            && (Utc::now().signed_duration_since(last_seen) <= Duration::seconds(60));
+
+        Ok(AgentPresence {
+            agent_name: name.to_string(),
+            status: st,
+            last_seen,
+            is_online,
+        })
+    }
+
+    async fn get_presence(&self, name: &str) -> Option<AgentPresence> {
+        let row = sqlx::query("SELECT name, status, last_seen FROM agora_agents WHERE name = $1")
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await
+            .ok()??;
+
+        let status_val: String = row.try_get("status").unwrap_or_else(|_| "offline".into());
+        let last_seen: DateTime<Utc> = row.try_get("last_seen").unwrap_or_else(|_| Utc::now());
+
+        let st = match status_val.as_str() {
+            "online" => AgentStatus::Online,
+            "busy" => AgentStatus::Busy,
+            _ => AgentStatus::Offline,
+        };
+
+        let is_online = st != AgentStatus::Offline
+            && (Utc::now().signed_duration_since(last_seen) <= Duration::seconds(60));
+
+        Some(AgentPresence {
+            agent_name: name.to_string(),
+            status: st,
+            last_seen,
+            is_online,
+        })
+    }
+
+    async fn list_presence(&self) -> Vec<AgentPresence> {
+        let rows = sqlx::query("SELECT name, status, last_seen FROM agora_agents ORDER BY name")
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default();
+
+        rows.into_iter()
+            .map(|row| {
+                let name: String = row.try_get("name").unwrap_or_default();
+                let status_val: String = row.try_get("status").unwrap_or_else(|_| "offline".into());
+                let last_seen: DateTime<Utc> =
+                    row.try_get("last_seen").unwrap_or_else(|_| Utc::now());
+
+                let st = match status_val.as_str() {
+                    "online" => AgentStatus::Online,
+                    "busy" => AgentStatus::Busy,
+                    _ => AgentStatus::Offline,
+                };
+
+                let is_online = st != AgentStatus::Offline
+                    && (Utc::now().signed_duration_since(last_seen) <= Duration::seconds(60));
+
+                AgentPresence {
+                    agent_name: name,
+                    status: st,
+                    last_seen,
+                    is_online,
+                }
+            })
+            .collect()
+    }
+
+    async fn find_by_service(&self, service_id: &str) -> Vec<ServiceListing> {
+        self.list_services()
+            .await
+            .into_iter()
+            .filter(|listing| listing.service.id == service_id)
+            .collect()
+    }
+
+    async fn list_services(&self) -> Vec<ServiceListing> {
+        let rows = sqlx::query("SELECT card, status, last_seen FROM agora_agents ORDER BY name")
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default();
+
+        let mut listings = Vec::new();
+
+        for row in rows {
+            let card_json: Option<Json<serde_json::Value>> = row.try_get("card").ok();
+            let Some(card_json) = card_json else { continue };
+            let Ok(card) = serde_json::from_value::<AgentCard>(card_json.0) else {
+                continue;
+            };
+
+            let status_val: String = row.try_get("status").unwrap_or_else(|_| "offline".into());
+            let last_seen: DateTime<Utc> = row.try_get("last_seen").unwrap_or_else(|_| Utc::now());
+
+            let st = match status_val.as_str() {
+                "online" => AgentStatus::Online,
+                "busy" => AgentStatus::Busy,
+                _ => AgentStatus::Offline,
+            };
+
+            let is_online = st != AgentStatus::Offline
+                && (Utc::now().signed_duration_since(last_seen) <= Duration::seconds(60));
+
+            let presence = AgentPresence {
+                agent_name: card.name.clone(),
+                status: st,
+                last_seen,
+                is_online,
+            };
+
+            for service in &card.services {
+                listings.push(ServiceListing {
+                    agent_name: card.name.clone(),
+                    agent_url: card.url.clone(),
+                    service: service.clone(),
+                    presence: presence.clone(),
+                });
+            }
+        }
+
+        listings
     }
 }
 
