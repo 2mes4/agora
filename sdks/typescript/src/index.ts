@@ -6,3 +6,4 @@ export * from './client.js';
 export * from './directory.js';
 export * from './heartbeat.js';
 export * from './server.js';
+export * from './agent.js';

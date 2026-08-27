@@ -1,5 +1,6 @@
 import { parseSseStream } from './events.js';
 import { DelegateBuilder } from './delegate.js';
+import { DirectoryClient } from './directory.js';
 import {
   A2aEvent,
   AgentCard,
@@ -29,11 +30,16 @@ export class AgoraClient {
   readonly gatewayUrl: string;
   readonly apiKey?: string;
   readonly defaultSender?: string;
+  readonly directory: DirectoryClient;
 
   constructor(options?: ClientOptions) {
     this.gatewayUrl = (options?.gatewayUrl || 'http://127.0.0.1:7100').replace(/\/+$/, '');
     this.apiKey = options?.apiKey;
     this.defaultSender = options?.defaultSender;
+    this.directory = new DirectoryClient({
+      gatewayUrl: this.gatewayUrl,
+      apiKey: this.apiKey,
+    });
   }
 
   /**
