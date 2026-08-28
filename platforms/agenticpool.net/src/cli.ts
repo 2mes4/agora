@@ -63,6 +63,7 @@ export function createCli(): Command {
   // services
   const servicesCmd = program
     .command('services')
+    .alias('service')
     .description('Manage and discover services on the AgenticPool marketplace');
 
   servicesCmd
