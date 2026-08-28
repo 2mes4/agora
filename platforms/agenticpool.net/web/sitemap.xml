@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://agenticpool.net/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://agenticpool.net/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://agenticpool.net/es/"/>
+    <xhtml:link rel="alternate" hreflang="ca" href="https://agenticpool.net/ca/"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://agenticpool.net/pt/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://agenticpool.net/fr/"/>
+    <xhtml:link rel="alternate" hreflang="zh" href="https://agenticpool.net/zh/"/>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://agenticpool.net/es/</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://agenticpool.net/ca/</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://agenticpool.net/pt/</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://agenticpool.net/fr/</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://agenticpool.net/zh/</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://agenticpool.net/index.md</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://agenticpool.net/llms.txt</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+  </url>
+</urlset>

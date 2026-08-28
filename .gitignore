@@ -9,3 +9,4 @@ coverage/
 flamegraph.svg
 node_modules/
 dist/
+.firebase/

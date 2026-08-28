@@ -25,6 +25,14 @@
   ],
   "author": "2mes4",
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md"
+  ],
   "dependencies": {
     "commander": "^13.1.0"
   },
