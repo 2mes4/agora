@@ -143,7 +143,15 @@ impl Gateway {
                 post(evaluate_contract_acceptance),
             )
             .route("/v1/contracts/{id}/settle", post(settle_contract))
+            .route(
+                "/v1/contracts/{id}/disconformity",
+                post(report_disconformity),
+            )
             .route("/v1/contracts/{id}/dispute", post(dispute_contract))
+            .route(
+                "/v1/contracts/{id}/dispute-accept",
+                post(accept_dispute_for_arbitration),
+            )
             .route("/v1/contracts/{id}/arbitrate", post(arbitrate_contract))
             .route("/v1/context", get(get_context).put(put_context))
             .route("/v1/dead-letters", get(list_dead_letters))
@@ -1018,6 +1026,29 @@ async fn settle_contract(
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DisconformityPayload {
+    notes: String,
+}
+
+async fn report_disconformity(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<DisconformityPayload>,
+) -> Response {
+    let mut contracts = state.contracts.write().await;
+    let Some(contract) = contracts.get_mut(&id) else {
+        return (StatusCode::NOT_FOUND, format!("contract not found: {id}")).into_response();
+    };
+
+    contract.status = agora_core::ContractStatus::DisconformityReported;
+    contract.dispute_terms.disconformity_notes = Some(payload.notes);
+    contract.updated_at = chrono::Utc::now().to_rfc3339();
+
+    Json(contract.clone()).into_response()
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DisputeContractPayload {
     reason: String,
 }
@@ -1041,6 +1072,49 @@ async fn dispute_contract(
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DisputeAcceptPayload {
+    #[serde(default)]
+    party: Option<String>,
+}
+
+async fn accept_dispute_for_arbitration(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(payload): Json<DisputeAcceptPayload>,
+) -> Response {
+    let mut contracts = state.contracts.write().await;
+    let Some(contract) = contracts.get_mut(&id) else {
+        return (StatusCode::NOT_FOUND, format!("contract not found: {id}")).into_response();
+    };
+
+    if contract.status != agora_core::ContractStatus::Disputed {
+        return (
+            StatusCode::CONFLICT,
+            format!(
+                "contract must be in disputed state to accept arbitration (current: {:?})",
+                contract.status
+            ),
+        )
+            .into_response();
+    }
+
+    let caller = payload.party.or_else(|| {
+        headers
+            .get("x-agora-sender")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+    });
+
+    contract.status = agora_core::ContractStatus::ArbitrationAccepted;
+    contract.dispute_terms.arbitration_accepted_by = caller;
+    contract.updated_at = chrono::Utc::now().to_rfc3339();
+
+    Json(contract.clone()).into_response()
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ArbitrateContractPayload {
     arbitrator: String,
     verdict: agora_core::ArbitrationVerdict,
@@ -1057,12 +1131,13 @@ async fn arbitrate_contract(
         return (StatusCode::NOT_FOUND, format!("contract not found: {id}")).into_response();
     };
 
-    contract.dispute_terms.arbitrator = Some(payload.arbitrator.clone());
-    contract.dispute_terms.arbitration_verdict = Some(format!("{:?}", payload.verdict));
-    contract.updated_at = chrono::Utc::now().to_rfc3339();
-
     let price = contract.pricing.service_price_gduck;
     let dispute_fee = contract.pricing.dispute_cost_gduck;
+
+    contract.dispute_terms.arbitrator = Some(payload.arbitrator.clone());
+    contract.dispute_terms.arbitration_verdict = Some(format!("{:?}", payload.verdict));
+    contract.dispute_terms.platform_treasury_fee_gduck = Some(dispute_fee);
+    contract.updated_at = chrono::Utc::now().to_rfc3339();
 
     let (
         worker_payout,

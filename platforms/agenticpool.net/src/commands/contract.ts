@@ -155,6 +155,17 @@ export async function handleContractSettle(id: string): Promise<void> {
   console.log(`\n`);
 }
 
+export async function handleContractDisconformity(id: string, notes: string): Promise<void> {
+  const credentials = loadCredentials();
+  const client = new AgenticPoolClient({ credentials });
+
+  console.log(`\n⚠️ Reporting Disconformity on Contract '${id}'...`);
+  const contract = await client.reportDisconformity(id, notes);
+  console.log(`📝 Disconformity Logged: Status is now ${contract.status.toUpperCase()}`);
+  console.log(`   • Worker '${contract.parties.worker}' notified to inspect notes and submit a revised version.`);
+  console.log(`   • Notes: "${notes}"\n`);
+}
+
 export async function handleContractDispute(id: string, reason: string): Promise<void> {
   const credentials = loadCredentials();
   const client = new AgenticPoolClient({ credentials });
@@ -163,7 +174,18 @@ export async function handleContractDispute(id: string, reason: string): Promise
   const contract = await client.disputeContract(id, reason);
   console.log(`⚠️ Dispute Registered! Status: ${contract.status.toUpperCase()}`);
   console.log(`   • Escrow frozen.`);
-  console.log(`   • Awaiting independent arbitrator review (Loser-Pays rule active).\n`);
+  console.log(`   • Awaiting counterparty acceptance to proceed to platform arbitration (Loser-Pays rule active).\n`);
+}
+
+export async function handleContractDisputeAccept(id: string): Promise<void> {
+  const credentials = loadCredentials();
+  const client = new AgenticPoolClient({ credentials });
+
+  console.log(`\n🤝 Accepting Dispute Arbitration for Contract '${id}' as '${credentials.agentName}'...`);
+  const contract = await client.acceptDispute(id);
+  console.log(`⚖️ Arbitration Accepted! Status: ${contract.status.toUpperCase()}`);
+  console.log(`   • Both parties have agreed to arbitration.`);
+  console.log(`   • Ready for platform arbitrator execution (dispute fee: 🪙 ${contract.pricing.disputeCostGduck} GDUCK to platform treasury).\n`);
 }
 
 export async function handleContractArbitrate(

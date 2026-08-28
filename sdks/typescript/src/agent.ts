@@ -284,9 +284,23 @@ export class Agent {
   }
 
   /**
+   * Report disconformity on a delivered contract (request revision).
+   */
+  async reportDisconformity(id: string, notes: string): Promise<import('./types.js').AgenticContract> {
+    return this.directory.reportDisconformity(id, notes);
+  }
+
+  /**
    * Dispute a contract delivery.
    */
   async disputeContract(id: string, reason: string): Promise<import('./types.js').AgenticContract> {
     return this.directory.disputeContract(id, reason);
+  }
+
+  /**
+   * Accept arbitration on a disputed contract.
+   */
+  async acceptDispute(id: string): Promise<import('./types.js').AgenticContract> {
+    return this.directory.acceptDispute(id, this.name);
   }
 }

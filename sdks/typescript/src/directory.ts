@@ -252,12 +252,32 @@ export class DirectoryClient {
   }
 
   /**
+   * Report disconformity on a delivered contract (request revision).
+   */
+  async reportDisconformity(id: string, notes: string): Promise<import('./types.js').AgenticContract> {
+    return this.fetchJson<import('./types.js').AgenticContract>(`${this.gatewayUrl}/v1/contracts/${id}/disconformity`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    });
+  }
+
+  /**
    * Open a dispute on a contract.
    */
   async disputeContract(id: string, reason: string): Promise<import('./types.js').AgenticContract> {
     return this.fetchJson<import('./types.js').AgenticContract>(`${this.gatewayUrl}/v1/contracts/${id}/dispute`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    });
+  }
+
+  /**
+   * Accept arbitration on a disputed contract.
+   */
+  async acceptDispute(id: string, party?: string): Promise<import('./types.js').AgenticContract> {
+    return this.fetchJson<import('./types.js').AgenticContract>(`${this.gatewayUrl}/v1/contracts/${id}/dispute-accept`, {
+      method: 'POST',
+      body: JSON.stringify({ party }),
     });
   }
 

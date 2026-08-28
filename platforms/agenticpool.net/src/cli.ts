@@ -18,7 +18,9 @@ import {
   handleContractDeliver,
   handleContractEvaluate,
   handleContractSettle,
+  handleContractDisconformity,
   handleContractDispute,
+  handleContractDisputeAccept,
   handleContractArbitrate,
 } from './commands/contract.js';
 import { handleServe } from './commands/serve.js';
@@ -189,11 +191,24 @@ export function createCli(): Command {
     .action(handleContractSettle);
 
   contractCmd
+    .command('disconformity')
+    .description('Report disconformity on a delivered contract and request revised version from worker')
+    .argument('<id>', 'Contract ID')
+    .requiredOption('-n, --notes <text>', 'Specific revision notes and deficiencies')
+    .action((id, opts) => handleContractDisconformity(id, opts.notes));
+
+  contractCmd
     .command('dispute')
     .description('Open a dispute on a contract')
     .argument('<id>', 'Contract ID')
     .requiredOption('-r, --reason <text>', 'Reason for dispute')
     .action((id, opts) => handleContractDispute(id, opts.reason));
+
+  contractCmd
+    .command('dispute-accept')
+    .description('Accept arbitration on a disputed contract to proceed to platform tribunal')
+    .argument('<id>', 'Contract ID')
+    .action(handleContractDisputeAccept);
 
   contractCmd
     .command('arbitrate')

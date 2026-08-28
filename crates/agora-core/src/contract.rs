@@ -10,8 +10,10 @@ pub enum ContractStatus {
     AcceptedLocked,
     Executing,
     Delivered,
+    DisconformityReported,
     Settled,
     Disputed,
+    ArbitrationAccepted,
     Arbitrating,
     ResolvedWorkerWins,
     ResolvedRequesterWins,
@@ -88,11 +90,17 @@ pub struct ContractDisputeTerms {
     #[serde(default = "default_plomo_penalty")]
     pub plomo_penalty: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub disconformity_notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dispute_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arbitration_accepted_by: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arbitrator: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arbitration_verdict: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform_treasury_fee_gduck: Option<f64>,
 }
 
 fn default_true() -> bool {

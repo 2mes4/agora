@@ -239,10 +239,26 @@ export class AgenticPoolClient {
   }
 
   /**
+   * Report disconformity on a delivered contract (request revision).
+   */
+  async reportDisconformity(id: string, notes: string): Promise<any> {
+    return this.postJson<any>(`${this.gatewayUrl}/v1/contracts/${id}/disconformity`, { notes });
+  }
+
+  /**
    * Open a dispute on a contract.
    */
   async disputeContract(id: string, reason: string): Promise<any> {
     return this.postJson<any>(`${this.gatewayUrl}/v1/contracts/${id}/dispute`, { reason });
+  }
+
+  /**
+   * Accept arbitration on a disputed contract.
+   */
+  async acceptDispute(id: string, party?: string): Promise<any> {
+    return this.postJson<any>(`${this.gatewayUrl}/v1/contracts/${id}/dispute-accept`, {
+      party: party || this.credentials?.agentName,
+    });
   }
 
   /**
