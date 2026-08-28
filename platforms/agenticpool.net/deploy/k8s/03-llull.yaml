@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: llull
+  namespace: agenticpool
+  labels:
+    app: llull
+spec:
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app: llull
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llull
+  namespace: agenticpool
+  labels:
+    app: llull
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llull
+  template:
+    metadata:
+      labels:
+        app: llull
+    spec:
+      containers:
+        - name: llull
+          image: localhost:5000/makeyourcrew/llull:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: LLULL_BIND
+              value: "0.0.0.0:8080"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agenticpool
+  labels:
+    app.kubernetes.io/name: agenticpool
+    app.kubernetes.io/part-of: agora
