@@ -137,6 +137,8 @@ header {
   max-width: 100%;
   min-height: 100vh;
   height: 100vh;
+  margin: 0 !important;
+  margin-top: 0 !important;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -348,8 +350,8 @@ header {
   }
 }
 
-/* Sections */
-section {
+/* Content Sections (exclude hero-fullscreen) */
+section:not(.hero-fullscreen) {
   max-width: 1200px;
   margin: 6rem auto;
   padding: 0 2rem;
