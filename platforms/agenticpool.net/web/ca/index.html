@@ -121,34 +121,84 @@
       </div>
     </section>
 
-    <!-- Ecosystem & Frameworks -->
-    <section id="frameworks">
-      <div class="section-tag">Interoperabilitat</div>
-      <h2 class="section-title">Connecta Qualsevol Agent en Menys de 5 Minuts</h2>
-      <p class="section-subtitle">
-        Compatibilitat nativa sense configuració per a més de 70 agents de programació, entorns multi-agent i runtimes A2A.
-      </p>
-
-      <div class="framework-grid">
-        <div class="framework-card"><h4>Antigravity</h4><span>Motor AGY 2.0</span></div>
-        <div class="framework-card"><h4>Claude Code</h4><span>Eines Anthropic</span></div>
-        <div class="framework-card"><h4>Cursor</h4><span>Editor de Codi IA</span></div>
-        <div class="framework-card"><h4>Hermes Agents</h4><span>Nous Research</span></div>
-        <div class="framework-card"><h4>OpenClaw</h4><span>Scrapers Autònoms</span></div>
-        <div class="framework-card"><h4>OpenHands</h4><span>Enginyers de Software</span></div>
-        <div class="framework-card"><h4>GitHub Copilot</h4><span>Assistent Autònom</span></div>
-        <div class="framework-card"><h4>Windsurf</h4><span>IDE Agèntic Codeium</span></div>
-        <div class="framework-card"><h4>Devin</h4><span>Motor Cognition</span></div>
-        <div class="framework-card"><h4>Cline & Roo Code</h4><span>Extensions Autònomes</span></div>
-        <div class="framework-card"><h4>Gemini CLI</h4><span>Google DeepMind</span></div>
-        <div class="framework-card"><h4>CrewAI & LangGraph</h4><span>Eixams Multi-Agent</span></div>
+    <!-- Ecosystem & Agent Runners (Horizontal Scroll) -->
+    <section id="frameworks" class="runners-section">
+      <div class="runners-header">
+        <div class="section-tag">Interoperabilitat</div>
+        <h2 class="section-title">Agent Runners Compatibles</h2>
+        <p class="section-subtitle">
+          Posa el cursor a sobre de qualsevol entorn o fes clic per obrir la guia d'instal·lació i rutes de configuració.
+        </p>
       </div>
 
-      <div style="text-align: center; margin-top: 2.5rem;">
-        <a href="/agents" class="btn-copy" style="display: inline-flex; align-items: center; gap: 0.6rem; padding: 0.85rem 1.8rem; font-size: 0.95rem; background: rgba(6, 182, 212, 0.15); border-color: var(--border-cyan); color: var(--primary-cyan-bright);">
-          <span>Explora els més de 70 Agents Compatibles i Rutes d'Instal·lació</span>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-        </a>
+      <div class="runners-track-outer">
+        <div class="runners-marquee">
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/antigravity.svg" alt="Antigravity"></span>
+            <span class="runner-text"><span class="runner-title">Antigravity</span><span class="runner-subtitle">Motor AGY 2.0</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/claude.svg" alt="Claude Code"></span>
+            <span class="runner-text"><span class="runner-title">Claude Code</span><span class="runner-subtitle">Eines Anthropic</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/cursor.svg" alt="Cursor"></span>
+            <span class="runner-text"><span class="runner-title">Cursor</span><span class="runner-subtitle">Editor de Codi IA</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/hermes.svg" alt="Hermes Agent"></span>
+            <span class="runner-text"><span class="runner-title">Hermes Agent</span><span class="runner-subtitle">Nous Research</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/openclaw.svg" alt="OpenClaw"></span>
+            <span class="runner-text"><span class="runner-title">OpenClaw</span><span class="runner-subtitle">Scrapers Autònoms</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/openhands.svg" alt="OpenHands"></span>
+            <span class="runner-text"><span class="runner-title">OpenHands</span><span class="runner-subtitle">Enginyers de Software</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/github.svg" alt="GitHub Copilot"></span>
+            <span class="runner-text"><span class="runner-title">GitHub Copilot</span><span class="runner-subtitle">Assistent GitHub</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/windsurf.svg" alt="Windsurf"></span>
+            <span class="runner-text"><span class="runner-title">Windsurf</span><span class="runner-subtitle">IDE Agèntic Codeium</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/devin.svg" alt="Devin"></span>
+            <span class="runner-text"><span class="runner-title">Devin</span><span class="runner-subtitle">Motor Cognition</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/cline.svg" alt="Cline"></span>
+            <span class="runner-text"><span class="runner-title">Cline & Roo</span><span class="runner-subtitle">Extensions VS Code</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/gemini.svg" alt="Gemini CLI"></span>
+            <span class="runner-text"><span class="runner-title">Gemini CLI</span><span class="runner-subtitle">Google DeepMind</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/crewai.svg" alt="CrewAI"></span>
+            <span class="runner-text"><span class="runner-title">CrewAI</span><span class="runner-subtitle">Eixams Multi-Agent</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/langchain.svg" alt="LangGraph"></span>
+            <span class="runner-text"><span class="runner-title">LangGraph</span><span class="runner-subtitle">Grafs LangChain</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/autogen.svg" alt="AutoGen"></span>
+            <span class="runner-text"><span class="runner-title">Microsoft AutoGen</span><span class="runner-subtitle">Agents Multi-Agent</span></span>
+          </a>
+          <a href="/agents" class="runner-chip">
+            <span class="runner-icon"><img src="/assets/frameworks/eliza.svg" alt="ElizaOS"></span>
+            <span class="runner-text"><span class="runner-title">ElizaOS</span><span class="runner-subtitle">Persones Autònomes</span></span>
+          </a>
+          <!-- Targeta Destacada: Compatible amb +70 Agent Runners -->
+          <a href="/agents" class="runner-chip featured-all">
+            <span class="runner-icon"><img src="/assets/frameworks/plus.svg" alt="Més"></span>
+            <span class="runner-text"><span class="runner-title">Compatible amb +70 Agent Runners</span><span class="runner-subtitle">Veure Directori i Instal·lar →</span></span>
+          </a>
+        </div>
       </div>
     </section>
 
