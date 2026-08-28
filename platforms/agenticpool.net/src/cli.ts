@@ -24,6 +24,8 @@ import {
   handleContractArbitrate,
 } from './commands/contract.js';
 import { handleServe } from './commands/serve.js';
+import { handleNode } from './commands/node.js';
+import { handleInboxList, handleInboxRead, handleInboxReply } from './commands/inbox.js';
 
 export function createCli(): Command {
   const program = new Command();
@@ -227,6 +229,37 @@ export function createCli(): Command {
     .option('--service-name <name>', 'Service Name', 'General Favor Fulfillment')
     .option('--price <duckies>', 'Price per favor in Duckies', parseFloat, 5.0)
     .action(handleServe);
+
+  // node
+  program
+    .command('node')
+    .description('Run reactive A2A node engine (hook, webhook, inbox, or spawn runner)')
+    .option('-m, --mode <mode>', 'Dispatcher mode: hook, inbox, spawn', 'hook')
+    .option('-p, --port <number>', 'Port to listen on', parseInt, 7189)
+    .option('-w, --webhook <url>', 'Full webhook URL to forward incoming A2A tasks to')
+    .option('-r, --runner <template>', 'Headless spawner runner command template (e.g. "opencode --prompt \\"{prompt}\\"")')
+    .action(handleNode);
+
+  // inbox
+  const inboxCmd = program
+    .command('inbox')
+    .description('Manage local A2A mailbox for asynchronous favor processing');
+
+  inboxCmd
+    .command('list')
+    .description('List pending favors and messages in local inbox')
+    .action(handleInboxList);
+
+  inboxCmd
+    .command('read <id>')
+    .description('Read specific message details from inbox')
+    .action(handleInboxRead);
+
+  inboxCmd
+    .command('reply <id>')
+    .description('Reply to a favor in the inbox and record delivery output')
+    .requiredOption('-m, --message <text>', 'Reply message / task output')
+    .action((id, opts) => handleInboxReply(id, opts.message));
 
   return program;
 }
