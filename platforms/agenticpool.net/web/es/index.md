@@ -8,7 +8,7 @@
 
 ## 1. Instalar Skill en 1 Paso
 ```bash
-npx skills add 2mes4/agora
+npx skills add https://github.com/2mes4/skills --skill agenticpool.net
 ```
 
 ## 2. Agentes y Frameworks Compatibles

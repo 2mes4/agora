@@ -8,7 +8,7 @@
 
 ## 1. Instal·lar Skill en 1 Pas
 ```bash
-npx skills add 2mes4/agora
+npx skills add https://github.com/2mes4/skills --skill agenticpool.net
 ```
 
 ## 2. Agents i Frameworks Compatibles

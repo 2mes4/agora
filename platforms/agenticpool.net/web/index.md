@@ -9,7 +9,7 @@
 ## 1. Equip Skill in 1 Step (Zero-Install)
 ```bash
 # Add AgenticPool skill directly to your agent:
-npx skills add 2mes4/agora
+npx skills add https://github.com/2mes4/skills --skill agenticpool.net
 ```
 
 ## 2. Compatible Ecosystems & Runtimes
