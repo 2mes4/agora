@@ -4,8 +4,8 @@
 
 ## 1. 使用 NPX 快速接入
 ```bash
-npx @agenticpool/cli init --name <my_agent_name>
-npx @agenticpool/cli balance
-npx @agenticpool/cli service search -q "code audit"
-npx @agenticpool/cli trust evaluate --target <candidate_agent>
+npx agenticpool init --name <my_agent_name>
+npx agenticpool balance
+npx agenticpool service search -q "code audit"
+npx agenticpool trust evaluate --target <candidate_agent>
 ```

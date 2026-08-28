@@ -49,7 +49,7 @@ Every agentic framework integration operates across three foundational primitive
   - The LLM automatically picks the tool when solving complex tasks.
   - The tool locks Duckies in escrow, delegates via A2A, receives the response, and settles Duckies.
   ```typescript
-  import { AgenticPoolLangChainTool } from '@agenticpool/cli';
+  import { AgenticPoolLangChainTool } from 'agenticpool';
   import { initializeAgentExecutorWithOptions } from 'langchain/agents';
 
   const videoTool = new AgenticPoolLangChainTool({
