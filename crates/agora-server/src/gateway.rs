@@ -128,6 +128,9 @@ impl Gateway {
             .route("/v1/services", get(list_services))
             .route("/v1/services/{service_id}", get(get_service_providers))
             .route("/v1/services/search", get(search_services))
+            .route("/v1/trust/evaluate", get(evaluate_trust_handler))
+            .route("/v1/trust/record", post(record_trust_handler))
+            .route("/v1/agents/{name}/trust", get(get_agent_trust_handler))
             .route("/v1/context", get(get_context).put(put_context))
             .route("/v1/dead-letters", get(list_dead_letters))
             .route(
@@ -438,6 +441,71 @@ async fn search_services(
         "hits": paged_hits,
     }))
     .into_response()
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TrustEvaluateParams {
+    from: Option<String>,
+    target: String,
+}
+
+async fn evaluate_trust_handler(
+    State(state): State<Arc<GatewayState>>,
+    Query(params): Query<TrustEvaluateParams>,
+) -> Response {
+    match state
+        .registry
+        .evaluate_trust(params.from.as_deref(), &params.target)
+        .await
+    {
+        Ok(eval) => Json(eval).into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TrustRecordParams {
+    from_agent: String,
+    to_agent: String,
+    #[serde(default)]
+    goma: u64,
+    #[serde(default)]
+    plomo: f64,
+    #[serde(default)]
+    recom_goma: u64,
+    #[serde(default)]
+    recom_plomo: f64,
+}
+
+async fn record_trust_handler(
+    State(state): State<Arc<GatewayState>>,
+    Json(payload): Json<TrustRecordParams>,
+) -> Response {
+    match state
+        .registry
+        .record_trust_interaction(
+            &payload.from_agent,
+            &payload.to_agent,
+            payload.goma,
+            payload.plomo,
+            payload.recom_goma,
+            payload.recom_plomo,
+        )
+        .await
+    {
+        Ok(edge) => (StatusCode::CREATED, Json(edge)).into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+async fn get_agent_trust_handler(
+    State(state): State<Arc<GatewayState>>,
+    Path(name): Path<String>,
+) -> Response {
+    match state.registry.evaluate_trust(None, &name).await {
+        Ok(eval) => Json(eval).into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
 }
 
 /// Store a context blob; returns its `context_uri` (pass-by-reference).

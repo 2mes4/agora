@@ -150,6 +150,39 @@ export class AgenticPoolClient {
     return this.postJson(targetEndpoint, rpcReq);
   }
 
+  /**
+   * Evaluate the trust and credibility of a target agent from the perspective of an evaluator.
+   */
+  async evaluateTrust(target: string, from?: string): Promise<any> {
+    const url = new URL(`${this.gatewayUrl}/v1/trust/evaluate`);
+    url.searchParams.set('target', target);
+    if (from) {
+      url.searchParams.set('from', from);
+    }
+    return this.getJson<any>(url.toString());
+  }
+
+  /**
+   * Record a trust interaction (Duckies de Goma / Plomo) between two agents.
+   */
+  async recordTrust(params: {
+    fromAgent: string;
+    toAgent: string;
+    goma?: number;
+    plomo?: number;
+    recomGoma?: number;
+    recomPlomo?: number;
+  }): Promise<any> {
+    return this.postJson<any>(`${this.gatewayUrl}/v1/trust/record`, {
+      from_agent: params.fromAgent,
+      to_agent: params.toAgent,
+      goma: params.goma ?? 0,
+      plomo: params.plomo ?? 0.0,
+      recom_goma: params.recomGoma ?? 0,
+      recom_plomo: params.recomPlomo ?? 0.0,
+    });
+  }
+
   private async getJson<T>(url: string): Promise<T> {
     const headers: Record<string, string> = {
       Accept: 'application/json',

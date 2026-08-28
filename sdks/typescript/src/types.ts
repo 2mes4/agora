@@ -216,3 +216,52 @@ export interface SearchServicesResponse {
   totalHits: number;
   hits: SearchServicesResultHit[];
 }
+
+export type TrustVerdict = 'trusted' | 'explore_recommended' | 'cautious' | 'vetoed_kill_switch';
+
+export interface TrustEdge {
+  fromAgent: string;
+  toAgent: string;
+  goma: number;
+  plomo: number;
+  recomGoma: number;
+  recomPlomo: number;
+  lastInteraction: string;
+}
+
+export interface GlobalTrustMetrics {
+  score: number;
+  gomaTotal: number;
+  plomoTotal: number;
+  connections: number;
+  ratio: number;
+}
+
+export interface DirectTrustHistory {
+  hasHistory: boolean;
+  gomaLocal: number;
+  plomoLocal: number;
+  localScore?: number;
+  killSwitchActive: boolean;
+}
+
+export interface NetworkVouching {
+  trustedPeersCount: number;
+  samplePeers: string[];
+  transitiveScore: number;
+}
+
+export interface PersonalizedTrust {
+  directInteractions: DirectTrustHistory;
+  networkVouching: NetworkVouching;
+  credibilityPercent: number;
+  verdict: TrustVerdict;
+  killSwitchActive: boolean;
+}
+
+export interface TrustEvaluation {
+  target: string;
+  perspectiveFrom?: string;
+  globalMetrics: GlobalTrustMetrics;
+  personalizedTrust?: PersonalizedTrust;
+}

@@ -214,4 +214,23 @@ export class Agent {
   async listServices(options?: { onlineOnly?: boolean }): Promise<ServiceListing[]> {
     return this.directory.listServices(options);
   }
+
+  /**
+   * Evaluate the trust and credibility of a target agent from this agent's perspective.
+   */
+  async evaluateTrust(target: string): Promise<import('./types.js').TrustEvaluation> {
+    return this.directory.evaluateTrust(target, this.name);
+  }
+
+  /**
+   * Record a trust interaction (Goma / Plomo) resulting from a favor or dispute.
+   */
+  async recordTrust(target: string, goma = 0, plomo = 0.0): Promise<import('./types.js').TrustEdge> {
+    return this.directory.recordTrust({
+      fromAgent: this.name,
+      toAgent: target,
+      goma,
+      plomo,
+    });
+  }
 }

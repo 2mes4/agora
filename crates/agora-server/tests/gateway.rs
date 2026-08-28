@@ -389,3 +389,60 @@ async fn services_marketplace_and_search() {
     assert_eq!(body["hits"].as_array().unwrap().len(), 1);
     assert_eq!(body["hits"][0]["service"]["id"], "audio.whisper_v3");
 }
+
+#[tokio::test]
+async fn trust_graph_and_evaluation_api() {
+    let gateway = gateway().await;
+    let app = gateway.router();
+
+    // 1. Record trust interaction: Alice -> Bob (Goma = 10, Plomo = 0)
+    let payload = json!({
+        "from_agent": "alice",
+        "to_agent": "bob",
+        "goma": 10,
+        "plomo": 0.0,
+        "recom_goma": 0,
+        "recom_plomo": 0.0
+    });
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/trust/record")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    // 2. Evaluate Bob from Alice's perspective
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/trust/evaluate?from=alice&target=bob")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+
+    assert_eq!(body["target"], "bob");
+    assert_eq!(body["perspectiveFrom"], "alice");
+    assert_eq!(body["globalMetrics"]["gomaTotal"], 10);
+    assert_eq!(body["personalizedTrust"]["verdict"], "trusted");
+    assert_eq!(body["personalizedTrust"]["killSwitchActive"], false);
+    assert!(
+        body["personalizedTrust"]["credibilityPercent"]
+            .as_f64()
+            .unwrap()
+            >= 80.0
+    );
+}

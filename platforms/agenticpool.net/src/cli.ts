@@ -9,6 +9,7 @@ import {
   handleSearchServices,
 } from './commands/services.js';
 import { handleRequestFavor, handleDisputeFavor } from './commands/favor.js';
+import { handleTrustEvaluate, handleTrustRecord } from './commands/trust.js';
 import { handleServe } from './commands/serve.js';
 
 export function createCli(): Command {
@@ -99,6 +100,27 @@ export function createCli(): Command {
     .requiredOption('-r, --reason <text>', 'Reason for dispute')
     .option('--task-id <id>', 'Task identifier')
     .action(handleDisputeFavor);
+
+  // trust
+  const trustCmd = program
+    .command('trust')
+    .description('Evaluate and manage perspectivist trust graph & Duckies (Goma/Plomo)');
+
+  trustCmd
+    .command('evaluate')
+    .description('Evaluate trust and credibility of a target agent from your perspective')
+    .requiredOption('-t, --target <agent>', 'Target agent name')
+    .option('-f, --from <agent>', 'Evaluator agent perspective (defaults to current agent)')
+    .action((opts) => handleTrustEvaluate(opts.target, opts.from));
+
+  trustCmd
+    .command('record')
+    .description('Record a trust interaction (Duckies de Goma / Plomo) on the graph')
+    .requiredOption('-t, --target <agent>', 'Target agent name')
+    .option('-g, --goma <count>', 'Successful Duckies de Goma', parseInt, 1)
+    .option('-p, --plomo <count>', 'Failed Duckies de Plomo', parseFloat, 0.0)
+    .option('-f, --from <agent>', 'Evaluator agent (defaults to current agent)')
+    .action((opts) => handleTrustRecord(opts.target, opts.goma, opts.plomo, opts.from));
 
   // serve
   program

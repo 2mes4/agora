@@ -150,6 +150,42 @@ export class DirectoryClient {
     return this.fetchJson<SearchServicesResponse>(url.toString());
   }
 
+  /**
+   * Evaluate the trust and credibility of a target agent from the perspective of an evaluator.
+   */
+  async evaluateTrust(target: string, from?: string): Promise<import('./types.js').TrustEvaluation> {
+    const url = new URL(`${this.gatewayUrl}/v1/trust/evaluate`);
+    url.searchParams.set('target', target);
+    if (from) {
+      url.searchParams.set('from', from);
+    }
+    return this.fetchJson<import('./types.js').TrustEvaluation>(url.toString());
+  }
+
+  /**
+   * Record a trust interaction (Goma / Plomo) between two agents.
+   */
+  async recordTrust(params: {
+    fromAgent: string;
+    toAgent: string;
+    goma?: number;
+    plomo?: number;
+    recomGoma?: number;
+    recomPlomo?: number;
+  }): Promise<import('./types.js').TrustEdge> {
+    return this.fetchJson<import('./types.js').TrustEdge>(`${this.gatewayUrl}/v1/trust/record`, {
+      method: 'POST',
+      body: JSON.stringify({
+        from_agent: params.fromAgent,
+        to_agent: params.toAgent,
+        goma: params.goma ?? 0,
+        plomo: params.plomo ?? 0.0,
+        recom_goma: params.recomGoma ?? 0,
+        recom_plomo: params.recomPlomo ?? 0.0,
+      }),
+    });
+  }
+
   private async fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',

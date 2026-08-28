@@ -11,6 +11,10 @@ pub mod llull;
 use std::collections::HashMap;
 
 use agora_core::a2a::{AgentCard, AgentService};
+use agora_core::trust::{
+    DirectTrustHistory, GlobalTrustMetrics, NetworkVouching, PersonalizedTrust, TrustEdge,
+    TrustEvaluation, TrustVerdict,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 pub use llull::{
@@ -96,12 +100,34 @@ pub trait Registry: Send + Sync {
 
     /// List all services registered across all agents.
     async fn list_services(&self) -> Vec<ServiceListing>;
+
+    /// Record a trust interaction between from_agent and to_agent.
+    async fn record_trust_interaction(
+        &self,
+        from_agent: &str,
+        to_agent: &str,
+        goma_delta: u64,
+        plomo_delta: f64,
+        recom_goma_delta: u64,
+        recom_plomo_delta: f64,
+    ) -> Result<TrustEdge, RegistryError>;
+
+    /// Evaluate trust of target_agent, optionally from the perspective of from_agent.
+    async fn evaluate_trust(
+        &self,
+        from_agent: Option<&str>,
+        target_agent: &str,
+    ) -> Result<TrustEvaluation, RegistryError>;
+
+    /// Get direct trust edge between two agents if it exists.
+    async fn get_trust_edge(&self, from_agent: &str, to_agent: &str) -> Option<TrustEdge>;
 }
 
-/// In-memory registry backed by an ordered map (deterministic listing) and presence tracker.
+/// In-memory registry backed by an ordered map, presence tracker, and trust graph.
 pub struct InMemoryRegistry {
     agents: RwLock<std::collections::BTreeMap<String, AgentCard>>,
     presence: RwLock<HashMap<String, (DateTime<Utc>, AgentStatus)>>,
+    trust_graph: RwLock<HashMap<(String, String), TrustEdge>>,
     liveness_ttl: Duration,
 }
 
@@ -110,6 +136,7 @@ impl Default for InMemoryRegistry {
         Self {
             agents: RwLock::new(std::collections::BTreeMap::new()),
             presence: RwLock::new(HashMap::new()),
+            trust_graph: RwLock::new(HashMap::new()),
             liveness_ttl: Duration::seconds(60),
         }
     }
@@ -126,6 +153,7 @@ impl InMemoryRegistry {
         Self {
             agents: RwLock::new(std::collections::BTreeMap::new()),
             presence: RwLock::new(HashMap::new()),
+            trust_graph: RwLock::new(HashMap::new()),
             liveness_ttl,
         }
     }
@@ -292,6 +320,190 @@ impl Registry for InMemoryRegistry {
         }
         listings
     }
+
+    async fn record_trust_interaction(
+        &self,
+        from_agent: &str,
+        to_agent: &str,
+        goma_delta: u64,
+        plomo_delta: f64,
+        recom_goma_delta: u64,
+        recom_plomo_delta: f64,
+    ) -> Result<TrustEdge, RegistryError> {
+        let key = (from_agent.to_string(), to_agent.to_string());
+        let mut graph = self.trust_graph.write().await;
+        let entry = graph.entry(key).or_insert_with(|| TrustEdge {
+            from_agent: from_agent.to_string(),
+            to_agent: to_agent.to_string(),
+            goma: 0,
+            plomo: 0.0,
+            recom_goma: 0,
+            recom_plomo: 0.0,
+            last_interaction: Utc::now().to_rfc3339(),
+        });
+
+        entry.goma += goma_delta;
+        entry.plomo += plomo_delta;
+        entry.recom_goma += recom_goma_delta;
+        entry.recom_plomo += recom_plomo_delta;
+        entry.last_interaction = Utc::now().to_rfc3339();
+
+        Ok(entry.clone())
+    }
+
+    async fn get_trust_edge(&self, from_agent: &str, to_agent: &str) -> Option<TrustEdge> {
+        let graph = self.trust_graph.read().await;
+        graph
+            .get(&(from_agent.to_string(), to_agent.to_string()))
+            .cloned()
+    }
+
+    async fn evaluate_trust(
+        &self,
+        from_agent: Option<&str>,
+        target_agent: &str,
+    ) -> Result<TrustEvaluation, RegistryError> {
+        let graph = self.trust_graph.read().await;
+
+        // 1. Global Aggregation for target_agent
+        let mut goma_total: u64 = 0;
+        let mut plomo_total: f64 = 0.0;
+        let mut connections_set = std::collections::HashSet::new();
+
+        for edge in graph.values() {
+            if edge.to_agent == target_agent {
+                goma_total += edge.goma;
+                plomo_total += edge.plomo;
+                if edge.goma > 0 || edge.plomo > 0.0 {
+                    connections_set.insert(edge.from_agent.clone());
+                }
+            }
+        }
+
+        let connections = connections_set.len();
+        let w_exito = 1.0;
+        let w_riesgo = 2.5;
+        let w_red = 2.0;
+
+        let global_score = (goma_total as f64 * w_exito) - (plomo_total * w_riesgo)
+            + ((1.0 + connections as f64).ln() * w_red);
+
+        let total_vol = goma_total as f64 + plomo_total;
+        let global_ratio = if total_vol > 0.0 {
+            goma_total as f64 / total_vol
+        } else {
+            1.0
+        };
+
+        let global_metrics = GlobalTrustMetrics {
+            score: (global_score * 100.0).round() / 100.0,
+            goma_total,
+            plomo_total: (plomo_total * 100.0).round() / 100.0,
+            connections,
+            ratio: (global_ratio * 1000.0).round() / 1000.0,
+        };
+
+        // 2. Personalized Trust (if from_agent is provided)
+        let personalized_trust = if let Some(from) = from_agent {
+            let lambda_risk = 5.0;
+            let direct_edge = graph.get(&(from.to_string(), target_agent.to_string()));
+
+            let (has_history, goma_local, plomo_local, local_score, kill_switch_active) =
+                if let Some(edge) = direct_edge {
+                    let kill_switch = edge.plomo > 0.0 && (edge.goma as f64) <= edge.plomo;
+                    let score = if kill_switch {
+                        None
+                    } else {
+                        Some((edge.goma as f64) - (edge.plomo * lambda_risk))
+                    };
+                    (true, edge.goma, edge.plomo, score, kill_switch)
+                } else {
+                    (false, 0, 0.0, None, false)
+                };
+
+            let direct_interactions = DirectTrustHistory {
+                has_history,
+                goma_local,
+                plomo_local: (plomo_local * 100.0).round() / 100.0,
+                local_score,
+                kill_switch_active,
+            };
+
+            // Transitive vouching from trusted contacts of `from`
+            let mut trusted_peers = Vec::new();
+            let mut transitive_score = 0.0;
+
+            for ((f, peer), peer_edge) in graph.iter() {
+                if f == from && peer != target_agent {
+                    // Check if `from` trusts this peer
+                    if peer_edge.goma > 0 && (peer_edge.goma as f64) > peer_edge.plomo {
+                        // Check if peer has edge to target
+                        if let Some(target_link) =
+                            graph.get(&(peer.clone(), target_agent.to_string()))
+                        {
+                            if target_link.goma > 0 {
+                                trusted_peers.push(peer.clone());
+                                transitive_score += (target_link.goma as f64) - target_link.plomo;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let network_vouching = NetworkVouching {
+                trusted_peers_count: trusted_peers.len(),
+                sample_peers: trusted_peers.into_iter().take(5).collect(),
+                transitive_score: (transitive_score * 100.0).round() / 100.0,
+            };
+
+            let (credibility_percent, verdict) = if kill_switch_active {
+                (0.0, TrustVerdict::VetoedKillSwitch)
+            } else if has_history {
+                let cred = ((goma_local as f64 + 1.0)
+                    / (goma_local as f64 + (plomo_local * 2.0) + 1.0))
+                    * 100.0;
+                let clamped = cred.clamp(0.0, 100.0);
+                let verd = if clamped >= 75.0 {
+                    TrustVerdict::Trusted
+                } else {
+                    TrustVerdict::Cautious
+                };
+                ((clamped * 10.0).round() / 10.0, verd)
+            } else {
+                // Cold-start / exploration with transitive boost
+                let base_cred = if total_vol > 0.0 {
+                    ((goma_total as f64 + 1.0) / (total_vol + 2.0)) * 100.0
+                } else {
+                    70.0
+                };
+                let boost = (network_vouching.transitive_score * 2.0).clamp(-20.0, 20.0);
+                let final_cred = (base_cred + boost).clamp(10.0, 95.0);
+                let verd = if final_cred >= 70.0 && global_score > 0.0 {
+                    TrustVerdict::ExploreRecommended
+                } else {
+                    TrustVerdict::Cautious
+                };
+                ((final_cred * 10.0).round() / 10.0, verd)
+            };
+
+            Some(PersonalizedTrust {
+                direct_interactions,
+                network_vouching,
+                credibility_percent,
+                verdict,
+                kill_switch_active,
+            })
+        } else {
+            None
+        };
+
+        Ok(TrustEvaluation {
+            target: target_agent.to_string(),
+            perspective_from: from_agent.map(|s| s.to_string()),
+            global_metrics,
+            personalized_trust,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -401,5 +613,46 @@ mod tests {
         assert!(hd_providers
             .iter()
             .any(|p| p.agent_name == "agent_b" && p.service.pricing.amount == 5.0));
+    }
+
+    #[tokio::test]
+    async fn trust_graph_and_kill_switch_veto() {
+        let registry = InMemoryRegistry::new();
+
+        // 1. Record positive interactions from Alice to Bob (Goma = 5, Plomo = 0)
+        registry
+            .record_trust_interaction("alice", "bob", 5, 0.0, 0, 0.0)
+            .await
+            .unwrap();
+
+        // Evaluate from Alice's perspective
+        let eval_alice = registry.evaluate_trust(Some("alice"), "bob").await.unwrap();
+        let pers_alice = eval_alice.personalized_trust.unwrap();
+        assert_eq!(pers_alice.verdict, TrustVerdict::Trusted);
+        assert!(!pers_alice.kill_switch_active);
+        assert!(pers_alice.credibility_percent >= 80.0);
+        assert_eq!(pers_alice.direct_interactions.goma_local, 5);
+
+        // 2. Record failure/fraud from Alice to Bob (Plomo = 5.0 -> Goma <= Plomo -> Kill Switch)
+        registry
+            .record_trust_interaction("alice", "bob", 0, 5.0, 0, 0.0)
+            .await
+            .unwrap();
+
+        let eval_vetoed = registry.evaluate_trust(Some("alice"), "bob").await.unwrap();
+        let pers_vetoed = eval_vetoed.personalized_trust.unwrap();
+        assert_eq!(pers_vetoed.verdict, TrustVerdict::VetoedKillSwitch);
+        assert!(pers_vetoed.kill_switch_active);
+        assert_eq!(pers_vetoed.credibility_percent, 0.0);
+        assert!(pers_vetoed.direct_interactions.local_score.is_none());
+
+        // 3. Charlie (who never interacted with Bob) evaluates Bob -> Explores global metrics
+        let eval_charlie = registry
+            .evaluate_trust(Some("charlie"), "bob")
+            .await
+            .unwrap();
+        let pers_charlie = eval_charlie.personalized_trust.unwrap();
+        assert!(!pers_charlie.kill_switch_active);
+        assert!(!pers_charlie.direct_interactions.has_history);
     }
 }

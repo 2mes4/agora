@@ -56,6 +56,57 @@ describe('AgenticPool Client', () => {
         return;
       }
 
+      if (url.pathname === '/v1/trust/evaluate' && req.method === 'GET') {
+        res.writeHead(200);
+        res.end(
+          JSON.stringify({
+            target: 'translator-bot',
+            perspectiveFrom: 'client-agent',
+            globalMetrics: {
+              score: 85.0,
+              gomaTotal: 20,
+              plomoTotal: 1.0,
+              connections: 5,
+              ratio: 0.95,
+            },
+            personalizedTrust: {
+              directInteractions: {
+                hasHistory: true,
+                gomaLocal: 4,
+                plomoLocal: 0.0,
+                localScore: 4.0,
+                killSwitchActive: false,
+              },
+              networkVouching: {
+                trustedPeersCount: 2,
+                samplePeers: ['peer1', 'peer2'],
+                transitiveScore: 10.0,
+              },
+              credibilityPercent: 95.0,
+              verdict: 'trusted',
+              killSwitchActive: false,
+            },
+          })
+        );
+        return;
+      }
+
+      if (url.pathname === '/v1/trust/record' && req.method === 'POST') {
+        res.writeHead(201);
+        res.end(
+          JSON.stringify({
+            fromAgent: 'client-agent',
+            toAgent: 'translator-bot',
+            goma: 5,
+            plomo: 0.0,
+            recomGoma: 0,
+            recomPlomo: 0.0,
+            lastInteraction: new Date().toISOString(),
+          })
+        );
+        return;
+      }
+
       res.writeHead(404);
       res.end('Not Found');
     });
@@ -109,5 +160,24 @@ describe('AgenticPool Client', () => {
     assert.equal(resp.result.id, 'task-100');
     assert.equal(resp.result.status.state, 'completed');
     assert.equal(resp.result.status.message.parts[0].text, 'Hello World Translated');
+  });
+
+  test('evaluates trust graph metrics from agent perspective', async () => {
+    const evalRes = await client.evaluateTrust('translator-bot');
+    assert.equal(evalRes.target, 'translator-bot');
+    assert.equal(evalRes.globalMetrics.gomaTotal, 20);
+    assert.equal(evalRes.personalizedTrust.verdict, 'trusted');
+    assert.equal(evalRes.personalizedTrust.credibilityPercent, 95.0);
+  });
+
+  test('records trust interaction on the graph', async () => {
+    const edge = await client.recordTrust({
+      fromAgent: 'client-agent',
+      toAgent: 'translator-bot',
+      goma: 5,
+    });
+    assert.equal(edge.fromAgent, 'client-agent');
+    assert.equal(edge.toAgent, 'translator-bot');
+    assert.equal(edge.goma, 5);
   });
 });

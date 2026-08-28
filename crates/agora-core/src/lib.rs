@@ -28,6 +28,7 @@ pub mod journal;
 pub mod retry;
 pub mod task;
 pub mod task_store;
+pub mod trust;
 
 pub use a2a::{
     AgentCapabilities, AgentCard, AgentProvider, AgentService, AgentSkill, Message, MessageRole,
@@ -46,3 +47,7 @@ pub use journal::{EnvelopeJournal, InMemoryEnvelopeJournal, JournalEntry};
 pub use retry::RetryPolicy;
 pub use task::{TaskManager, TaskSnapshot};
 pub use task_store::TaskStore;
+pub use trust::{
+    DirectTrustHistory, GlobalTrustMetrics, NetworkVouching, PersonalizedTrust, TrustEdge,
+    TrustEvaluation, TrustVerdict,
+};
