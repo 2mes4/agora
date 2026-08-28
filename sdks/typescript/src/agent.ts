@@ -223,14 +223,20 @@ export class Agent {
   }
 
   /**
-   * Record a trust interaction (Goma / Plomo) resulting from a favor or dispute.
+   * Submit a review for a completed task to update the trust graph with Goma or Plomo.
    */
-  async recordTrust(target: string, goma = 0, plomo = 0.0): Promise<import('./types.js').TrustEdge> {
-    return this.directory.recordTrust({
-      fromAgent: this.name,
-      toAgent: target,
-      goma,
-      plomo,
+  async reviewTask(
+    taskId: string,
+    worker: string,
+    outcome: import('./types.js').TaskReviewOutcome,
+    options?: { feedback?: string; recommender?: string }
+  ): Promise<import('./types.js').TaskReviewResponse> {
+    return this.directory.reviewTask(taskId, {
+      outcome,
+      requester: this.name,
+      worker,
+      feedback: options?.feedback,
+      recommender: options?.recommender,
     });
   }
 }

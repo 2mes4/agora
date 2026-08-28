@@ -67,6 +67,20 @@ export async function handleRequestFavor(options: {
       console.log(`-----------------------------------------`);
       console.log(reply);
       console.log(`-----------------------------------------\n`);
+
+      // 4. Proof-of-Execution: Record +1 Duckie de Goma on Trust Graph via Task Review
+      if (task?.id) {
+        try {
+          await client.reviewTask(task.id, {
+            outcome: 'satisfied',
+            worker: options.target,
+            feedback: 'Favor delivered and validated',
+          });
+          console.log(`🦆 +1 Duckie de Goma awarded to '${options.target}' on the Trust Graph!`);
+        } catch {
+          // Non-blocking if gateway offline during local test
+        }
+      }
     } else {
       const reason = !validation.valid ? validation.reason! : `Task state was '${taskState}'`;
       // Open Dispute / Refund Escrow
@@ -87,6 +101,19 @@ export async function handleRequestFavor(options: {
       );
       console.log(`\n⚠️  Favor rejected by anti-fraud check (${reason}).`);
       console.log(`🛡️ Escrow refunded to '${credentials.agentName}'.`);
+
+      if (task?.id) {
+        try {
+          await client.reviewTask(task.id, {
+            outcome: 'fraud',
+            worker: options.target,
+            feedback: reason,
+          });
+          console.log(`🌑 Duckies de Plomo assessed to '${options.target}' on the Trust Graph.`);
+        } catch {
+          // Non-blocking
+        }
+      }
     }
   } catch (err: unknown) {
     ledger.refundEscrow(
@@ -110,6 +137,7 @@ export async function handleDisputeFavor(options: {
 }): Promise<void> {
   const credentials = loadCredentials();
   const ledger = new DuckiesLedger();
+  const client = new AgenticPoolClient({ credentials });
 
   const dispute = ledger.openDispute(
     credentials.agentName,
@@ -127,4 +155,55 @@ export async function handleDisputeFavor(options: {
   console.log(`💰 Amount:        ${options.amount} DUCKIES`);
   console.log(`📝 Reason:        ${options.reason}`);
   console.log(`⏳ Status:        ${dispute.status}`);
+
+  if (options.taskId) {
+    try {
+      await client.reviewTask(options.taskId, {
+        outcome: 'disputed',
+        worker: options.target,
+        feedback: options.reason,
+      });
+      console.log(`⚖️ Task review recorded on Trust Graph for task '${options.taskId}'.`);
+    } catch {
+      // Non-blocking
+    }
+  }
+}
+
+export async function handleReviewTask(options: {
+  taskId: string;
+  worker: string;
+  outcome: 'satisfied' | 'rejected' | 'disputed' | 'fraud';
+  feedback?: string;
+  recommender?: string;
+}): Promise<void> {
+  const credentials = loadCredentials();
+  const client = new AgenticPoolClient({ credentials });
+
+  console.log(`\n📝 Submitting Task Review for '${options.taskId}'...`);
+  try {
+    const res = await client.reviewTask(options.taskId, {
+      outcome: options.outcome,
+      worker: options.worker,
+      feedback: options.feedback,
+      recommender: options.recommender,
+    });
+
+    console.log(`\n✅ Task Review Processed (Proof-of-Execution):`);
+    console.log(`=========================================`);
+    console.log(`🆔 Task ID:         ${res.taskId}`);
+    console.log(`📊 Outcome:         ${res.outcome.toUpperCase()}`);
+    console.log(`🦆 Goma Awarded:    +${res.gomaAwarded}`);
+    console.log(`🌑 Plomo Assessed:  +${res.plomoAssessed}`);
+    console.log(`👤 Evaluator:       ${res.edgeUpdated.fromAgent}`);
+    console.log(`🎯 Worker:          ${res.edgeUpdated.toAgent}`);
+    console.log(`📈 New Edge Goma:   🦆 ${res.edgeUpdated.goma} | 🌑 ${res.edgeUpdated.plomo.toFixed(1)}`);
+    if (res.recommenderEdgeUpdated) {
+      console.log(`⭐ Recommender (${options.recommender}) Edge Updated: 🦆 ${res.recommenderEdgeUpdated.recomGoma} Recom Goma`);
+    }
+    console.log(`=========================================\n`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`❌ Failed to submit task review: ${msg}`);
+  }
 }

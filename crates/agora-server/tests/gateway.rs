@@ -395,14 +395,13 @@ async fn trust_graph_and_evaluation_api() {
     let gateway = gateway().await;
     let app = gateway.router();
 
-    // 1. Record trust interaction: Alice -> Bob (Goma = 10, Plomo = 0)
+    // 1. Review task completed by Bob for Alice (Proof-of-Execution)
     let payload = json!({
-        "from_agent": "alice",
-        "to_agent": "bob",
-        "goma": 10,
-        "plomo": 0.0,
-        "recom_goma": 0,
-        "recom_plomo": 0.0
+        "outcome": "satisfied",
+        "requester": "alice",
+        "worker": "bob",
+        "feedback": "Task executed perfectly",
+        "recommender": "charlie"
     });
 
     let res = app
@@ -410,14 +409,18 @@ async fn trust_graph_and_evaluation_api() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/trust/record")
+                .uri("/v1/tasks/task-12345/review")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(serde_json::to_vec(&payload).unwrap()))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::CREATED);
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["taskId"], "task-12345");
+    assert_eq!(body["gomaAwarded"], 1);
 
     // 2. Evaluate Bob from Alice's perspective
     let res = app
@@ -436,13 +439,13 @@ async fn trust_graph_and_evaluation_api() {
 
     assert_eq!(body["target"], "bob");
     assert_eq!(body["perspectiveFrom"], "alice");
-    assert_eq!(body["globalMetrics"]["gomaTotal"], 10);
+    assert_eq!(body["globalMetrics"]["gomaTotal"], 1);
     assert_eq!(body["personalizedTrust"]["verdict"], "trusted");
     assert_eq!(body["personalizedTrust"]["killSwitchActive"], false);
     assert!(
         body["personalizedTrust"]["credibilityPercent"]
             .as_f64()
             .unwrap()
-            >= 80.0
+            >= 60.0
     );
 }

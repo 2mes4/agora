@@ -129,7 +129,7 @@ impl Gateway {
             .route("/v1/services/{service_id}", get(get_service_providers))
             .route("/v1/services/search", get(search_services))
             .route("/v1/trust/evaluate", get(evaluate_trust_handler))
-            .route("/v1/trust/record", post(record_trust_handler))
+            .route("/v1/tasks/{task_id}/review", post(review_task_handler))
             .route("/v1/agents/{name}/trust", get(get_agent_trust_handler))
             .route("/v1/context", get(get_context).put(put_context))
             .route("/v1/dead-letters", get(list_dead_letters))
@@ -464,38 +464,121 @@ async fn evaluate_trust_handler(
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct TrustRecordParams {
-    from_agent: String,
-    to_agent: String,
-    #[serde(default)]
-    goma: u64,
-    #[serde(default)]
-    plomo: f64,
-    #[serde(default)]
-    recom_goma: u64,
-    #[serde(default)]
-    recom_plomo: f64,
+#[serde(rename_all = "snake_case")]
+enum TaskReviewOutcome {
+    Satisfied,
+    Rejected,
+    Disputed,
+    Fraud,
 }
 
-async fn record_trust_handler(
+#[derive(Debug, serde::Deserialize)]
+struct TaskReviewPayload {
+    outcome: TaskReviewOutcome,
+    #[serde(default)]
+    requester: Option<String>,
+    #[serde(default)]
+    worker: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    feedback: Option<String>,
+    #[serde(default)]
+    recommender: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskReviewResponse {
+    task_id: String,
+    outcome: String,
+    goma_awarded: u64,
+    plomo_assessed: f64,
+    edge_updated: agora_core::trust::TrustEdge,
+    recommender_edge_updated: Option<agora_core::trust::TrustEdge>,
+}
+
+async fn review_task_handler(
     State(state): State<Arc<GatewayState>>,
-    Json(payload): Json<TrustRecordParams>,
+    Path(task_id): Path<String>,
+    headers: HeaderMap,
+    Json(payload): Json<TaskReviewPayload>,
 ) -> Response {
-    match state
-        .registry
-        .record_trust_interaction(
-            &payload.from_agent,
-            &payload.to_agent,
-            payload.goma,
-            payload.plomo,
-            payload.recom_goma,
-            payload.recom_plomo,
+    let caller_sender = headers
+        .get("x-agora-sender")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let requester = payload.requester.or(caller_sender);
+    let worker = payload.worker;
+
+    let Some(from_agent) = requester else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "requester agent identity is required",
         )
+            .into_response();
+    };
+
+    let Some(to_agent) = worker else {
+        return (StatusCode::BAD_REQUEST, "worker agent identity is required").into_response();
+    };
+
+    if from_agent == to_agent {
+        return (
+            StatusCode::BAD_REQUEST,
+            "an agent cannot review its own task",
+        )
+            .into_response();
+    }
+
+    let (goma_delta, plomo_delta, recom_goma_delta, recom_plomo_delta) = match payload.outcome {
+        TaskReviewOutcome::Satisfied => (1u64, 0.0f64, 1u64, 0.0f64),
+        TaskReviewOutcome::Rejected => (0u64, 0.5f64, 0u64, 0.5f64),
+        TaskReviewOutcome::Disputed => (0u64, 1.0f64, 0u64, 1.0f64),
+        TaskReviewOutcome::Fraud => (0u64, 2.0f64, 0u64, 1.5f64),
+    };
+
+    let edge = match state
+        .registry
+        .record_trust_interaction(&from_agent, &to_agent, goma_delta, plomo_delta, 0, 0.0)
         .await
     {
-        Ok(edge) => (StatusCode::CREATED, Json(edge)).into_response(),
-        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+        Ok(e) => e,
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    };
+
+    let mut recommender_edge_updated = None;
+    if let Some(recom) = &payload.recommender {
+        if recom != &from_agent && recom != &to_agent {
+            if let Ok(rec_edge) = state
+                .registry
+                .record_trust_interaction(
+                    &from_agent,
+                    recom,
+                    0,
+                    0.0,
+                    recom_goma_delta,
+                    recom_plomo_delta,
+                )
+                .await
+            {
+                recommender_edge_updated = Some(rec_edge);
+            }
+        }
     }
+
+    (
+        StatusCode::OK,
+        Json(TaskReviewResponse {
+            task_id,
+            outcome: format!("{:?}", payload.outcome).to_lowercase(),
+            goma_awarded: goma_delta,
+            plomo_assessed: plomo_delta,
+            edge_updated: edge,
+            recommender_edge_updated,
+        }),
+    )
+        .into_response()
 }
 
 async fn get_agent_trust_handler(

@@ -163,23 +163,24 @@ export class AgenticPoolClient {
   }
 
   /**
-   * Record a trust interaction (Duckies de Goma / Plomo) between two agents.
+   * Submit a review for a completed task (Proof-of-Execution) to update the trust graph.
    */
-  async recordTrust(params: {
-    fromAgent: string;
-    toAgent: string;
-    goma?: number;
-    plomo?: number;
-    recomGoma?: number;
-    recomPlomo?: number;
-  }): Promise<any> {
-    return this.postJson<any>(`${this.gatewayUrl}/v1/trust/record`, {
-      from_agent: params.fromAgent,
-      to_agent: params.toAgent,
-      goma: params.goma ?? 0,
-      plomo: params.plomo ?? 0.0,
-      recom_goma: params.recomGoma ?? 0,
-      recom_plomo: params.recomPlomo ?? 0.0,
+  async reviewTask(
+    taskId: string,
+    payload: {
+      outcome: 'satisfied' | 'rejected' | 'disputed' | 'fraud';
+      worker: string;
+      requester?: string;
+      feedback?: string;
+      recommender?: string;
+    }
+  ): Promise<any> {
+    return this.postJson<any>(`${this.gatewayUrl}/v1/tasks/${taskId}/review`, {
+      outcome: payload.outcome,
+      worker: payload.worker,
+      requester: payload.requester || this.credentials?.agentName,
+      feedback: payload.feedback,
+      recommender: payload.recommender,
     });
   }
 

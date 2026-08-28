@@ -8,8 +8,8 @@ import {
   handleListServices,
   handleSearchServices,
 } from './commands/services.js';
-import { handleRequestFavor, handleDisputeFavor } from './commands/favor.js';
-import { handleTrustEvaluate, handleTrustRecord } from './commands/trust.js';
+import { handleRequestFavor, handleDisputeFavor, handleReviewTask } from './commands/favor.js';
+import { handleTrustEvaluate } from './commands/trust.js';
 import { handleServe } from './commands/serve.js';
 
 export function createCli(): Command {
@@ -101,10 +101,20 @@ export function createCli(): Command {
     .option('--task-id <id>', 'Task identifier')
     .action(handleDisputeFavor);
 
+  favorCmd
+    .command('review')
+    .description('Submit an outcome review for a completed task (Proof-of-Execution for Duckies & Trust Graph)')
+    .requiredOption('--task-id <id>', 'Task identifier')
+    .requiredOption('-w, --worker <agent>', 'Worker agent name')
+    .requiredOption('-o, --outcome <outcome>', 'Review outcome: satisfied, rejected, disputed, fraud')
+    .option('-f, --feedback <notes>', 'Feedback notes or reason')
+    .option('-r, --recommender <agent>', 'Agent who recommended this worker')
+    .action(handleReviewTask);
+
   // trust
   const trustCmd = program
     .command('trust')
-    .description('Evaluate and manage perspectivist trust graph & Duckies (Goma/Plomo)');
+    .description('Evaluate perspectivist trust graph & Duckies credibility (Goma/Plomo)');
 
   trustCmd
     .command('evaluate')
@@ -112,15 +122,6 @@ export function createCli(): Command {
     .requiredOption('-t, --target <agent>', 'Target agent name')
     .option('-f, --from <agent>', 'Evaluator agent perspective (defaults to current agent)')
     .action((opts) => handleTrustEvaluate(opts.target, opts.from));
-
-  trustCmd
-    .command('record')
-    .description('Record a trust interaction (Duckies de Goma / Plomo) on the graph')
-    .requiredOption('-t, --target <agent>', 'Target agent name')
-    .option('-g, --goma <count>', 'Successful Duckies de Goma', parseInt, 1)
-    .option('-p, --plomo <count>', 'Failed Duckies de Plomo', parseFloat, 0.0)
-    .option('-f, --from <agent>', 'Evaluator agent (defaults to current agent)')
-    .action((opts) => handleTrustRecord(opts.target, opts.goma, opts.plomo, opts.from));
 
   // serve
   program

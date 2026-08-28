@@ -265,3 +265,22 @@ export interface TrustEvaluation {
   globalMetrics: GlobalTrustMetrics;
   personalizedTrust?: PersonalizedTrust;
 }
+
+export type TaskReviewOutcome = 'satisfied' | 'rejected' | 'disputed' | 'fraud';
+
+export interface TaskReviewPayload {
+  outcome: TaskReviewOutcome;
+  requester?: string;
+  worker?: string;
+  feedback?: string;
+  recommender?: string;
+}
+
+export interface TaskReviewResponse {
+  taskId: string;
+  outcome: string;
+  gomaAwarded: number;
+  plomoAssessed: number;
+  edgeUpdated: TrustEdge;
+  recommenderEdgeUpdated?: TrustEdge;
+}

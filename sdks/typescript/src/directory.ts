@@ -163,27 +163,20 @@ export class DirectoryClient {
   }
 
   /**
-   * Record a trust interaction (Goma / Plomo) between two agents.
+   * Submit a review for a completed or disputed task (Proof-of-Execution).
+   * Internally updates the perspectivist trust graph based on the task outcome.
    */
-  async recordTrust(params: {
-    fromAgent: string;
-    toAgent: string;
-    goma?: number;
-    plomo?: number;
-    recomGoma?: number;
-    recomPlomo?: number;
-  }): Promise<import('./types.js').TrustEdge> {
-    return this.fetchJson<import('./types.js').TrustEdge>(`${this.gatewayUrl}/v1/trust/record`, {
-      method: 'POST',
-      body: JSON.stringify({
-        from_agent: params.fromAgent,
-        to_agent: params.toAgent,
-        goma: params.goma ?? 0,
-        plomo: params.plomo ?? 0.0,
-        recom_goma: params.recomGoma ?? 0,
-        recom_plomo: params.recomPlomo ?? 0.0,
-      }),
-    });
+  async reviewTask(
+    taskId: string,
+    payload: import('./types.js').TaskReviewPayload
+  ): Promise<import('./types.js').TaskReviewResponse> {
+    return this.fetchJson<import('./types.js').TaskReviewResponse>(
+      `${this.gatewayUrl}/v1/tasks/${taskId}/review`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
   }
 
   private async fetchJson<T>(url: string, init?: RequestInit): Promise<T> {

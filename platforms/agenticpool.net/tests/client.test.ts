@@ -91,17 +91,23 @@ describe('AgenticPool Client', () => {
         return;
       }
 
-      if (url.pathname === '/v1/trust/record' && req.method === 'POST') {
-        res.writeHead(201);
+      if (url.pathname === '/v1/tasks/task-100/review' && req.method === 'POST') {
+        res.writeHead(200);
         res.end(
           JSON.stringify({
-            fromAgent: 'client-agent',
-            toAgent: 'translator-bot',
-            goma: 5,
-            plomo: 0.0,
-            recomGoma: 0,
-            recomPlomo: 0.0,
-            lastInteraction: new Date().toISOString(),
+            taskId: 'task-100',
+            outcome: 'satisfied',
+            gomaAwarded: 1,
+            plomoAssessed: 0.0,
+            edgeUpdated: {
+              fromAgent: 'client-agent',
+              toAgent: 'translator-bot',
+              goma: 1,
+              plomo: 0.0,
+              recomGoma: 0,
+              recomPlomo: 0.0,
+              lastInteraction: new Date().toISOString(),
+            },
           })
         );
         return;
@@ -170,14 +176,16 @@ describe('AgenticPool Client', () => {
     assert.equal(evalRes.personalizedTrust.credibilityPercent, 95.0);
   });
 
-  test('records trust interaction on the graph', async () => {
-    const edge = await client.recordTrust({
-      fromAgent: 'client-agent',
-      toAgent: 'translator-bot',
-      goma: 5,
+  test('submits task review and updates trust graph via Proof-of-Execution', async () => {
+    const reviewRes = await client.reviewTask('task-100', {
+      outcome: 'satisfied',
+      worker: 'translator-bot',
+      feedback: 'Excellent translation',
     });
-    assert.equal(edge.fromAgent, 'client-agent');
-    assert.equal(edge.toAgent, 'translator-bot');
-    assert.equal(edge.goma, 5);
+    assert.equal(reviewRes.taskId, 'task-100');
+    assert.equal(reviewRes.outcome, 'satisfied');
+    assert.equal(reviewRes.gomaAwarded, 1);
+    assert.equal(reviewRes.edgeUpdated.fromAgent, 'client-agent');
+    assert.equal(reviewRes.edgeUpdated.toAgent, 'translator-bot');
   });
 });

@@ -48,27 +48,3 @@ export async function handleTrustEvaluate(target: string, fromAgent?: string): P
   }
   console.log(`======================================================\n`);
 }
-
-export async function handleTrustRecord(
-  target: string,
-  goma = 0,
-  plomo = 0.0,
-  fromAgent?: string
-): Promise<void> {
-  const credentials = loadCredentials();
-  const evaluator = fromAgent || credentials.agentName;
-  const client = new AgenticPoolClient({ credentials });
-
-  const edge = await client.recordTrust({
-    fromAgent: evaluator,
-    toAgent: target,
-    goma,
-    plomo,
-  });
-
-  console.log(`\n✅ Interacción registrada en el Grafo de Confianza:`);
-  console.log(`   • De:              ${edge.fromAgent}`);
-  console.log(`   • Hacia:           ${edge.toAgent}`);
-  console.log(`   • Total Goma:      🦆 ${edge.goma}`);
-  console.log(`   • Total Plomo:     🌑 ${edge.plomo.toFixed(1)}\n`);
-}
