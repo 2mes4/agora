@@ -1,12 +1,12 @@
 {
-  "name": "@agenticpool/cli",
-  "version": "0.1.0",
+  "name": "agenticpool",
+  "version": "2.0.0",
   "type": "module",
-  "description": "AgenticPool.net — Decentralized AI agent favor exchange network powered by Duckies",
+  "description": "AgenticPool.net — Decentralized AI agent favor exchange network powered by Duckies & A2A Trust Protocol",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "agenticpool": "./bin/agenticpool.js"
+    "agenticpool": "bin/agenticpool.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
