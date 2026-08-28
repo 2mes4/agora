@@ -311,50 +311,69 @@ header {
 }
 
 /* Animated Scroll Down Indicator */
-.scroll-down {
-  position: absolute;
-  bottom: 1.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 3;
-  color: #ffffff;
+/* Photos Scattered Table Stack Transition */
+.photos-scattered-container {
+  width: 100%;
+  max-width: 900px;
+  margin: -2.5rem auto 4rem auto;
+  padding: 1.5rem 1rem;
   display: flex;
-  flex-direction: column;
+  justify-content: center;
   align-items: center;
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  opacity: 0.95;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9), 0 0 20px #000000;
-  background: rgba(0, 0, 0, 0.5);
-  padding: 0.4rem 0.8rem;
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(8px);
-  animation: bounceDown 2.2s infinite;
+  position: relative;
+  z-index: 10;
 }
 
-.scroll-down:hover {
-  opacity: 1;
-  color: var(--primary-cyan-bright);
+.photos-scattered-stack {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 220px;
 }
 
-.scroll-down svg {
-  filter: drop-shadow(0 0 10px rgba(6, 182, 212, 0.8));
+.photo-card {
+  position: absolute;
+  width: 240px;
+  height: 165px;
+  border-radius: 8px;
+  padding: 6px 6px 14px 6px;
+  background: #ffffff;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.75), 0 5px 15px rgba(0, 0, 0, 0.5);
+  transition: all 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  cursor: pointer;
+  overflow: hidden;
 }
 
-@keyframes bounceDown {
-  0%, 20%, 50%, 80%, 100% {
-    transform: translateY(0) translateX(-50%);
-  }
-  40% {
-    transform: translateY(10px) translateX(-50%);
-  }
-  60% {
-    transform: translateY(5px) translateX(-50%);
-  }
+.photo-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+}
+
+.photo-card.photo-left {
+  transform: translateX(-110px) rotate(-8deg);
+  z-index: 1;
+}
+
+.photo-card.photo-center {
+  transform: translateX(0) rotate(1.5deg) scale(1.05);
+  z-index: 2;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.85), 0 0 25px rgba(6, 182, 212, 0.25);
+}
+
+.photo-card.photo-right {
+  transform: translateX(110px) rotate(8deg);
+  z-index: 1;
+}
+
+.photo-card:hover {
+  transform: translateY(-12px) scale(1.12) rotate(0deg) !important;
+  z-index: 5 !important;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.9), 0 0 30px rgba(6, 182, 212, 0.45);
 }
 
 /* Content Sections (exclude hero-fullscreen) */
@@ -707,5 +726,64 @@ footer {
   .footer-inner {
     flex-direction: column;
     text-align: center;
+  }
+
+  /* Mobile Photos Scattered Stack */
+  .photos-scattered-container {
+    margin: 1.5rem auto 3rem auto;
+    padding: 1rem 0.5rem;
+  }
+  .photos-scattered-stack {
+    height: 170px;
+  }
+  .photo-card {
+    width: 155px;
+    height: 110px;
+    padding: 4px 4px 10px 4px;
+  }
+  .photo-card.photo-left {
+    transform: translateX(-50px) rotate(-7deg);
+  }
+  .photo-card.photo-center {
+    transform: translateX(0) rotate(1.5deg) scale(1.04);
+  }
+  .photo-card.photo-right {
+    transform: translateX(50px) rotate(7deg);
+  }
+
+  /* Mobile Compatible Agent Runners: Centered text list without icons */
+  .runners-track-outer {
+    overflow: visible;
+    mask-image: none;
+    -webkit-mask-image: none;
+    padding: 0.5rem 0.5rem;
+  }
+  .runners-marquee {
+    animation: none;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem 0.6rem;
+    width: 100%;
+  }
+  .runner-chip {
+    padding: 0.4rem 0.85rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    opacity: 0.85;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    backdrop-filter: blur(8px);
+    text-align: center;
+  }
+  .runner-chip img,
+  .runner-chip svg {
+    display: none !important;
+  }
+  .runner-chip.featured-all {
+    opacity: 1;
+    font-weight: 700;
+    border-color: var(--gold-duckie);
+    background: rgba(251, 191, 36, 0.12);
   }
 }
