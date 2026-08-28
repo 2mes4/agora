@@ -172,7 +172,18 @@ impl InMemoryRegistry {
 impl Registry for InMemoryRegistry {
     async fn register(&self, card: AgentCard) -> Result<(), RegistryError> {
         let name = card.name.clone();
-        self.agents.write().await.insert(name.clone(), card);
+        let mut agents = self.agents.write().await;
+        if let Some(existing) = agents.get(&name) {
+            if let (Some(existing_pk), Some(new_pk)) = (&existing.public_key, &card.public_key) {
+                if existing_pk != new_pk {
+                    return Err(RegistryError::AlreadyRegistered(format!(
+                        "agent name '{name}' is already claimed by another public key"
+                    )));
+                }
+            }
+        }
+        agents.insert(name.clone(), card);
+        drop(agents);
         self.presence
             .write()
             .await

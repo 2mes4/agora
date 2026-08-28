@@ -211,6 +211,18 @@ impl TaskStore for PostgresStore {
 #[async_trait]
 impl Registry for PostgresStore {
     async fn register(&self, card: AgentCard) -> Result<(), RegistryError> {
+        let existing = agora_registry::Registry::get(self, &card.name).await;
+        if let Some(existing_card) = existing {
+            if let (Some(existing_pk), Some(new_pk)) = (&existing_card.public_key, &card.public_key)
+            {
+                if existing_pk != new_pk {
+                    return Err(RegistryError::AlreadyRegistered(format!(
+                        "agent name '{}' is already claimed by another public key",
+                        card.name
+                    )));
+                }
+            }
+        }
         let value =
             serde_json::to_value(&card).map_err(|err| RegistryError::Database(err.to_string()))?;
         sqlx::query(

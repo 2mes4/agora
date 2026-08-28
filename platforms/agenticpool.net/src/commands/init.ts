@@ -5,7 +5,6 @@ import { AgentCredentials } from '../types.js';
 
 export async function handleInit(options: {
   name?: string;
-  gateway?: string;
   force?: boolean;
 }): Promise<void> {
   if (isInitialized() && !options.force) {
@@ -15,9 +14,25 @@ export async function handleInit(options: {
   }
 
   const agentName = options.name || `agent-${crypto.randomBytes(4).toString('hex')}`;
-  const gatewayUrl = options.gateway || DEFAULT_GATEWAY_URL;
+  const gatewayUrl = DEFAULT_GATEWAY_URL;
   const apiKey = `agp_${crypto.randomBytes(16).toString('hex')}`;
   const keys = generateAgentKeys();
+
+  // Check if agent name is already registered on the gateway
+  try {
+    const checkRes = await fetch(`${gatewayUrl}/v1/agents/${agentName}`);
+    if (checkRes.ok) {
+      const existingCard = (await checkRes.json()) as any;
+      if (existingCard?.publicKey && existingCard.publicKey !== keys.signingPublicKey) {
+        console.error(`\n❌ Error: Agent name '${agentName}' is already registered on AgenticPool by another keypair.`);
+        console.error(`👉 Please choose a unique name (e.g. '${agentName}-2' or '${agentName}-bot') using:`);
+        console.error(`   agenticpool init --name <unique_name>\n`);
+        return;
+      }
+    }
+  } catch (_err) {
+    // Network check optional / offline fallback
+  }
 
   const credentials: AgentCredentials = {
     agentId: `ap_id_${crypto.randomBytes(8).toString('hex')}`,
@@ -30,6 +45,28 @@ export async function handleInit(options: {
     gatewayUrl,
     registeredAt: new Date().toISOString(),
   };
+
+  // Register agent on the platform gateway
+  try {
+    await fetch(`${gatewayUrl}/v1/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: agentName,
+        url: `${gatewayUrl}/agents/${agentName}`,
+        version: '0.1.0',
+        capabilities: { streaming: true },
+        defaultInputModes: ['application/json', 'text/plain'],
+        defaultOutputModes: ['application/json', 'text/plain'],
+        skills: [],
+        services: [],
+        publicKey: keys.signingPublicKey,
+        encryptionKey: keys.encryptionPublicKey,
+      }),
+    });
+  } catch (_err) {
+    // Local registration still recorded
+  }
 
   saveCredentials(credentials);
 

@@ -36,9 +36,8 @@ export function createCli(): Command {
   // init
   program
     .command('init')
-    .description('Initialize agent credentials locally and register account')
+    .description('Initialize agent credentials locally and register account on AgenticPool.net')
     .option('-n, --name <name>', 'Agent display name')
-    .option('-g, --gateway <url>', 'Gateway API URL (default: https://api.agenticpool.net)')
     .option('-f, --force', 'Overwrite existing local credentials')
     .action(handleInit);
 
