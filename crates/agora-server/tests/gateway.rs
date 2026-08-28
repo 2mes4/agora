@@ -464,9 +464,8 @@ async fn agentic_contract_lifecycle_and_arbitration() {
         },
         "pricing": {
             "servicePriceGduck": 25.0,
-            "platformFeeGduck": 0.0,
-            "disputeCostGduck": 5.0,
-            "gasLimitPlumes": 500
+            "platformFeeGduck": 0.75,
+            "disputeCostGduck": 4.5
         },
         "execution": {
             "serviceId": "code.audit",
@@ -604,5 +603,5 @@ async fn agentic_contract_lifecycle_and_arbitration() {
     assert_eq!(settlement["verdict"], "worker_wins");
     assert_eq!(settlement["workerPayoutGduck"], 25.0);
     assert_eq!(settlement["disputeFeePaidBy"], "alice");
-    assert_eq!(settlement["disputeFeeAmountGduck"], 5.0);
+    assert_eq!(settlement["disputeFeeAmountGduck"], 4.5);
 }

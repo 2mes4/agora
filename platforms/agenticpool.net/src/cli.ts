@@ -148,7 +148,7 @@ export function createCli(): Command {
     .requiredOption('-s, --service <serviceId>', 'Service identifier')
     .requiredOption('-p, --price <gduck>', 'Service price in Golden Duckies (GDUCK)', parseFloat)
     .requiredOption('-a, --acceptance-prompt <prompt>', 'Acceptance criteria prompt (returns true/false/uncertain)')
-    .option('-d, --dispute-cost <gduck>', 'Arbitration fee in GDUCK (Loser-Pays)', parseFloat, 5.0)
+    .option('-d, --dispute-cost <gduck>', 'Arbitration fee in GDUCK (Loser-Pays, defaults to 18%, min 0.5 GDUCK)', parseFloat)
     .option('-m, --prompt <taskPrompt>', 'Task input prompt')
     .option('-r, --recommender <agent>', 'Agent who recommended this worker')
     .action(handleContractPropose);

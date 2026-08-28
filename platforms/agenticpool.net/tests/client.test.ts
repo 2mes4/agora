@@ -120,7 +120,7 @@ describe('AgenticPool Client', () => {
             id: 'ctr-100',
             version: '1.0',
             parties: { requester: 'client-agent', worker: 'translator-bot' },
-            pricing: { servicePriceGduck: 20.0, disputeCostGduck: 5.0 },
+            pricing: { servicePriceGduck: 20.0, platformFeeGduck: 0.6, disputeCostGduck: 3.6 },
             execution: {
               serviceId: 'text.translate',
               timeoutSeconds: 300,
@@ -248,7 +248,7 @@ describe('AgenticPool Client', () => {
   test('proposes and evaluates smart contract with prompt acceptance criteria', async () => {
     const contract = await client.proposeContract({
       parties: { requester: 'client-agent', worker: 'translator-bot' },
-      pricing: { servicePriceGduck: 20.0, disputeCostGduck: 5.0 },
+      pricing: { servicePriceGduck: 20.0, platformFeeGduck: 0.6, disputeCostGduck: 3.6 },
       execution: {
         serviceId: 'text.translate',
         timeoutSeconds: 300,

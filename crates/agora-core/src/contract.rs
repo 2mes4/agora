@@ -43,7 +43,7 @@ pub struct ContractParties {
     pub worker_signature: Option<String>,
 }
 
-/// Financial and gas parameters for a contract in Golden Duckies (GDUCK) and Plumes.
+/// Financial parameters for a contract in Golden Duckies (GDUCK).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ContractPricing {
@@ -51,12 +51,29 @@ pub struct ContractPricing {
     #[serde(default)]
     pub platform_fee_gduck: f64,
     pub dispute_cost_gduck: f64,
-    #[serde(default = "default_gas_limit")]
-    pub gas_limit_plumes: u64,
 }
 
-fn default_gas_limit() -> u64 {
-    1000
+impl ContractPricing {
+    /// Calculate standard 3% platform fee in GDUCK.
+    pub fn compute_platform_fee(service_price: f64) -> f64 {
+        ((service_price * 0.03) * 100.0).round() / 100.0
+    }
+
+    /// Calculate standard 18% dispute resolution fee with 0.5 GDUCK minimum.
+    pub fn compute_dispute_cost(service_price: f64) -> f64 {
+        let raw = service_price * 0.18;
+        let rounded = (raw * 100.0).round() / 100.0;
+        rounded.max(0.5)
+    }
+
+    /// Create default pricing from service price.
+    pub fn from_service_price(service_price: f64) -> Self {
+        Self {
+            service_price_gduck: service_price,
+            platform_fee_gduck: Self::compute_platform_fee(service_price),
+            dispute_cost_gduck: Self::compute_dispute_cost(service_price),
+        }
+    }
 }
 
 /// Acceptance criteria containing an evaluation prompt returning true/false/uncertain.

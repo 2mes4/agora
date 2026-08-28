@@ -13,13 +13,17 @@ export async function handleContractPropose(options: {
   const credentials = loadCredentials();
   const client = new AgenticPoolClient({ credentials });
 
+  const platformFee = Math.round(options.price * 0.03 * 100) / 100;
+  const disputeCost = options.disputeCost ?? Math.max(0.5, Math.round(options.price * 0.18 * 100) / 100);
+
   console.log(`\n📜 Proposing Agentic Smart Contract...`);
   console.log(`======================================================`);
   console.log(`👤 Requester:          ${credentials.agentName}`);
   console.log(`🎯 Worker:             ${options.worker}`);
   console.log(`🆔 Service:            ${options.service}`);
   console.log(`💰 Price:              🪙 ${options.price} GDUCK`);
-  console.log(`⚖️ Dispute Fee:        🪙 ${options.disputeCost ?? 5.0} GDUCK (Loser-Pays)`);
+  console.log(`🏛️ Platform Fee (3%):  🪙 ${platformFee} GDUCK`);
+  console.log(`⚖️ Dispute Fee (18%):  🪙 ${disputeCost} GDUCK (Loser-Pays, min 0.5 GDUCK)`);
   console.log(`🧪 Acceptance Prompt:  "${options.acceptancePrompt}"`);
   if (options.recommender) {
     console.log(`⭐ Recommender:        ${options.recommender}`);
@@ -33,9 +37,8 @@ export async function handleContractPropose(options: {
     },
     pricing: {
       servicePriceGduck: options.price,
-      platformFeeGduck: 0.0,
-      disputeCostGduck: options.disputeCost ?? 5.0,
-      gasLimitPlumes: 1000,
+      platformFeeGduck: platformFee,
+      disputeCostGduck: disputeCost,
     },
     execution: {
       serviceId: options.service,

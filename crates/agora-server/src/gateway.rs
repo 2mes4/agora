@@ -788,10 +788,23 @@ struct ProposeContractPayload {
 
 async fn propose_contract(
     State(state): State<Arc<GatewayState>>,
-    Json(payload): Json<ProposeContractPayload>,
+    Json(mut payload): Json<ProposeContractPayload>,
 ) -> Response {
     let now = chrono::Utc::now().to_rfc3339();
     let contract_id = format!("ctr-{}", uuid::Uuid::new_v4());
+
+    if payload.pricing.platform_fee_gduck <= 0.0 {
+        payload.pricing.platform_fee_gduck =
+            agora_core::contract::ContractPricing::compute_platform_fee(
+                payload.pricing.service_price_gduck,
+            );
+    }
+    if payload.pricing.dispute_cost_gduck <= 0.0 {
+        payload.pricing.dispute_cost_gduck =
+            agora_core::contract::ContractPricing::compute_dispute_cost(
+                payload.pricing.service_price_gduck,
+            );
+    }
 
     let contract = agora_core::AgenticContract {
         id: contract_id.clone(),

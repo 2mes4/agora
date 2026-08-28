@@ -311,7 +311,6 @@ export interface ContractPricing {
   servicePriceGduck: number;
   platformFeeGduck?: number;
   disputeCostGduck: number;
-  gasLimitPlumes?: number;
 }
 
 export interface AcceptanceCriteria {
