@@ -113,6 +113,62 @@ describe('AgenticPool Client', () => {
         return;
       }
 
+      if (url.pathname === '/v1/contracts' && req.method === 'POST') {
+        res.writeHead(201);
+        res.end(
+          JSON.stringify({
+            id: 'ctr-100',
+            version: '1.0',
+            parties: { requester: 'client-agent', worker: 'translator-bot' },
+            pricing: { servicePriceGduck: 20.0, disputeCostGduck: 5.0 },
+            execution: {
+              serviceId: 'text.translate',
+              timeoutSeconds: 300,
+              inputPayload: { text: 'Hello' },
+              acceptanceCriteria: { prompt: 'Valid translation' },
+            },
+            disputeTerms: { validationPrompt: 'Verify translation', loserPays: true },
+            status: 'proposed',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+        );
+        return;
+      }
+
+      if (url.pathname === '/v1/contracts/ctr-100/evaluate' && req.method === 'POST') {
+        res.writeHead(200);
+        res.end(
+          JSON.stringify({
+            contractId: 'ctr-100',
+            result: 'true',
+            rationale: 'Passes acceptance criteria',
+            qualityScore: 95.0,
+          })
+        );
+        return;
+      }
+
+      if (url.pathname === '/v1/contracts/ctr-100/arbitrate' && req.method === 'POST') {
+        res.writeHead(200);
+        res.end(
+          JSON.stringify({
+            contractId: 'ctr-100',
+            verdict: 'worker_wins',
+            arbitrator: 'referee-node',
+            rationale: 'Worker satisfied prompt criteria',
+            workerPayoutGduck: 20.0,
+            requesterRefundGduck: 0.0,
+            disputeFeePaidBy: 'client-agent',
+            disputeFeeAmountGduck: 5.0,
+            workerPlomoDelta: 0.0,
+            requesterPlomoDelta: 1.0,
+            recommenderPlomoDelta: 0.0,
+          })
+        );
+        return;
+      }
+
       res.writeHead(404);
       res.end('Not Found');
     });
@@ -187,5 +243,39 @@ describe('AgenticPool Client', () => {
     assert.equal(reviewRes.gomaAwarded, 1);
     assert.equal(reviewRes.edgeUpdated.fromAgent, 'client-agent');
     assert.equal(reviewRes.edgeUpdated.toAgent, 'translator-bot');
+  });
+
+  test('proposes and evaluates smart contract with prompt acceptance criteria', async () => {
+    const contract = await client.proposeContract({
+      parties: { requester: 'client-agent', worker: 'translator-bot' },
+      pricing: { servicePriceGduck: 20.0, disputeCostGduck: 5.0 },
+      execution: {
+        serviceId: 'text.translate',
+        timeoutSeconds: 300,
+        inputPayload: { text: 'Hello' },
+        acceptanceCriteria: { prompt: 'Valid translation' },
+      },
+      disputeTerms: { validationPrompt: 'Verify translation', loserPays: true },
+    });
+    assert.equal(contract.id, 'ctr-100');
+    assert.equal(contract.status, 'proposed');
+
+    const evalRes = await client.evaluateContractAcceptance('ctr-100');
+    assert.equal(evalRes.contractId, 'ctr-100');
+    assert.equal(evalRes.result, 'true');
+    assert.equal(evalRes.qualityScore, 95.0);
+  });
+
+  test('arbitrates disputed contract enforcing Loser-Pays rule', async () => {
+    const settlement = await client.arbitrateContract('ctr-100', {
+      arbitrator: 'referee-node',
+      verdict: 'worker_wins',
+      rationale: 'Worker satisfied prompt criteria',
+    });
+    assert.equal(settlement.contractId, 'ctr-100');
+    assert.equal(settlement.verdict, 'worker_wins');
+    assert.equal(settlement.workerPayoutGduck, 20.0);
+    assert.equal(settlement.disputeFeePaidBy, 'client-agent');
+    assert.equal(settlement.disputeFeeAmountGduck, 5.0);
   });
 });

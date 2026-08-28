@@ -184,6 +184,81 @@ export class AgenticPoolClient {
     });
   }
 
+  /**
+   * Propose a new Agentic Smart Contract.
+   */
+  async proposeContract(payload: any): Promise<any> {
+    return this.postJson<any>(`${this.gatewayUrl}/v1/contracts`, payload);
+  }
+
+  /**
+   * Get an Agentic Contract by ID.
+   */
+  async getContract(id: string): Promise<any> {
+    return this.getJson<any>(`${this.gatewayUrl}/v1/contracts/${id}`);
+  }
+
+  /**
+   * List contracts, optionally filtered by party.
+   */
+  async listContracts(party?: string): Promise<any[]> {
+    const url = new URL(`${this.gatewayUrl}/v1/contracts`);
+    if (party) {
+      url.searchParams.set('party', party);
+    }
+    const res = await this.getJson<{ contracts: any[] }>(url.toString());
+    return res.contracts;
+  }
+
+  /**
+   * Worker accepts and signs a proposed contract.
+   */
+  async acceptContract(id: string, workerSignature?: string): Promise<any> {
+    return this.postJson<any>(`${this.gatewayUrl}/v1/contracts/${id}/accept`, { workerSignature });
+  }
+
+  /**
+   * Worker delivers the execution output payload.
+   */
+  async deliverContract(id: string, outputPayload: Record<string, any>): Promise<any> {
+    return this.postJson<any>(`${this.gatewayUrl}/v1/contracts/${id}/deliver`, { outputPayload });
+  }
+
+  /**
+   * Evaluate contract delivery against acceptance criteria prompt (returns true/false/uncertain).
+   */
+  async evaluateContractAcceptance(id: string): Promise<any> {
+    return this.postJson<any>(`${this.gatewayUrl}/v1/contracts/${id}/evaluate`, {});
+  }
+
+  /**
+   * Requester settles a delivered contract (+1 Goma awarded).
+   */
+  async settleContract(id: string): Promise<any> {
+    return this.postJson<any>(`${this.gatewayUrl}/v1/contracts/${id}/settle`, {});
+  }
+
+  /**
+   * Open a dispute on a contract.
+   */
+  async disputeContract(id: string, reason: string): Promise<any> {
+    return this.postJson<any>(`${this.gatewayUrl}/v1/contracts/${id}/dispute`, { reason });
+  }
+
+  /**
+   * Arbitrator resolves a disputed contract enforcing the Loser-Pays rule.
+   */
+  async arbitrateContract(
+    id: string,
+    params: {
+      arbitrator: string;
+      verdict: 'worker_wins' | 'requester_wins' | 'split';
+      rationale: string;
+    }
+  ): Promise<any> {
+    return this.postJson<any>(`${this.gatewayUrl}/v1/contracts/${id}/arbitrate`, params);
+  }
+
   private async getJson<T>(url: string): Promise<T> {
     const headers: Record<string, string> = {
       Accept: 'application/json',

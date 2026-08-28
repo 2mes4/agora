@@ -449,3 +449,160 @@ async fn trust_graph_and_evaluation_api() {
             >= 60.0
     );
 }
+
+#[tokio::test]
+async fn agentic_contract_lifecycle_and_arbitration() {
+    let gateway = gateway().await;
+    let app = gateway.router();
+
+    // 1. Propose Contract: Alice -> Bob with dispute terms & prompt acceptance criteria
+    let propose_payload = json!({
+        "parties": {
+            "requester": "alice",
+            "worker": "bob",
+            "recommender": "charlie"
+        },
+        "pricing": {
+            "servicePriceGduck": 25.0,
+            "platformFeeGduck": 0.0,
+            "disputeCostGduck": 5.0,
+            "gasLimitPlumes": 500
+        },
+        "execution": {
+            "serviceId": "code.audit",
+            "timeoutSeconds": 300,
+            "inputPayload": { "code": "pub fn transfer() {}" },
+            "acceptanceCriteria": {
+                "prompt": "Evaluate that output contains vulnerabilities and severity fields",
+                "rules": ["valid_json", "no_errors"]
+            }
+        },
+        "disputeTerms": {
+            "validationPrompt": "Verify whether the delivered audit satisfies the security criteria",
+            "loserPays": true,
+            "plomoPenalty": 2.0
+        }
+    });
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/contracts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&propose_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let contract: Value = serde_json::from_slice(&bytes).unwrap();
+    let contract_id = contract["id"].as_str().unwrap().to_string();
+    assert_eq!(contract["status"], "proposed");
+
+    // 2. Accept Contract (Worker Bob signs)
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/contracts/{contract_id}/accept"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({ "workerSignature": "sig_bob_123" })).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let accepted: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(accepted["status"], "accepted_locked");
+
+    // 3. Deliver Contract Output
+    let deliver_payload = json!({
+        "outputPayload": {
+            "vulnerabilities": [],
+            "severity": "LOW",
+            "recommendations": "No reentrancy detected"
+        }
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/contracts/{contract_id}/deliver"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&deliver_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 4. Evaluate Acceptance Criteria (passes -> true)
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/contracts/{contract_id}/evaluate"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let eval: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(eval["result"], "true");
+    assert_eq!(eval["qualityScore"], 95.0);
+
+    // 5. Open Dispute (Simulating disagreement)
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/contracts/{contract_id}/dispute"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({ "reason": "Requester claims report was brief" }))
+                        .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 6. Arbitrate with Loser-Pays Rule: Arbitrator declares WorkerWins (requester paid dispute fee)
+    let arb_payload = json!({
+        "arbitrator": "network_jury_node",
+        "verdict": "worker_wins",
+        "rationale": "Worker delivered valid schema and correctly analyzed the function"
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/contracts/{contract_id}/arbitrate"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&arb_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let settlement: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(settlement["verdict"], "worker_wins");
+    assert_eq!(settlement["workerPayoutGduck"], 25.0);
+    assert_eq!(settlement["disputeFeePaidBy"], "alice");
+    assert_eq!(settlement["disputeFeeAmountGduck"], 5.0);
+}

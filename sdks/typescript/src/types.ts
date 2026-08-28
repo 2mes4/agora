@@ -284,3 +284,90 @@ export interface TaskReviewResponse {
   edgeUpdated: TrustEdge;
   recommenderEdgeUpdated?: TrustEdge;
 }
+
+export type ContractStatus =
+  | 'proposed'
+  | 'accepted_locked'
+  | 'executing'
+  | 'delivered'
+  | 'settled'
+  | 'disputed'
+  | 'arbitrating'
+  | 'resolved_worker_wins'
+  | 'resolved_requester_wins'
+  | 'cancelled';
+
+export type AcceptanceEvaluationResult = 'true' | 'false' | 'uncertain';
+
+export interface ContractParties {
+  requester: string;
+  worker: string;
+  recommender?: string;
+  requesterSignature?: string;
+  workerSignature?: string;
+}
+
+export interface ContractPricing {
+  servicePriceGduck: number;
+  platformFeeGduck?: number;
+  disputeCostGduck: number;
+  gasLimitPlumes?: number;
+}
+
+export interface AcceptanceCriteria {
+  prompt: string;
+  rules?: string[];
+}
+
+export interface ContractExecution {
+  serviceId: string;
+  timeoutSeconds: number;
+  inputPayload: Record<string, any>;
+  expectedOutputSchema?: Record<string, any>;
+  acceptanceCriteria: AcceptanceCriteria;
+}
+
+export interface ContractDisputeTerms {
+  validationPrompt: string;
+  loserPays?: boolean;
+  plomoPenalty?: number;
+  disputeReason?: string;
+  arbitrator?: string;
+  arbitrationVerdict?: string;
+}
+
+export interface AgenticContract {
+  id: string;
+  version: string;
+  parties: ContractParties;
+  pricing: ContractPricing;
+  execution: ContractExecution;
+  disputeTerms: ContractDisputeTerms;
+  status: ContractStatus;
+  outputPayload?: Record<string, any>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AcceptanceEvaluation {
+  contractId: string;
+  result: AcceptanceEvaluationResult;
+  rationale: string;
+  qualityScore: number;
+}
+
+export type ArbitrationVerdict = 'worker_wins' | 'requester_wins' | 'split';
+
+export interface ArbitrationSettlement {
+  contractId: string;
+  verdict: ArbitrationVerdict;
+  arbitrator: string;
+  rationale: string;
+  workerPayoutGduck: number;
+  requesterRefundGduck: number;
+  disputeFeePaidBy: string;
+  disputeFeeAmountGduck: number;
+  workerPlomoDelta: number;
+  requesterPlomoDelta: number;
+  recommenderPlomoDelta: number;
+}

@@ -44,6 +44,8 @@ pub struct GatewayState {
     pub envelope_journal: Arc<dyn agora_core::EnvelopeJournal>,
     /// Llull Search Engine bridge client (optional).
     pub llull: Option<Arc<agora_registry::LlullClient>>,
+    /// In-memory & persisted Agentic Contracts.
+    pub contracts: RwLock<HashMap<String, agora_core::AgenticContract>>,
 }
 
 /// The gateway node: a router + registry + hosted agents.
@@ -81,6 +83,7 @@ impl Gateway {
                 dead_letter_store: backend.dead_letter_store,
                 envelope_journal: backend.envelope_journal,
                 llull,
+                contracts: RwLock::new(HashMap::new()),
             }),
         }
     }
@@ -131,6 +134,17 @@ impl Gateway {
             .route("/v1/trust/evaluate", get(evaluate_trust_handler))
             .route("/v1/tasks/{task_id}/review", post(review_task_handler))
             .route("/v1/agents/{name}/trust", get(get_agent_trust_handler))
+            .route("/v1/contracts", get(list_contracts).post(propose_contract))
+            .route("/v1/contracts/{id}", get(get_contract))
+            .route("/v1/contracts/{id}/accept", post(accept_contract))
+            .route("/v1/contracts/{id}/deliver", post(deliver_contract))
+            .route(
+                "/v1/contracts/{id}/evaluate",
+                post(evaluate_contract_acceptance),
+            )
+            .route("/v1/contracts/{id}/settle", post(settle_contract))
+            .route("/v1/contracts/{id}/dispute", post(dispute_contract))
+            .route("/v1/contracts/{id}/arbitrate", post(arbitrate_contract))
             .route("/v1/context", get(get_context).put(put_context))
             .route("/v1/dead-letters", get(list_dead_letters))
             .route(
@@ -753,4 +767,407 @@ async fn hosted_agent_card(
         Some(endpoint) => Json(endpoint.card.clone()).into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProposeContractPayload {
+    parties: agora_core::ContractParties,
+    pricing: agora_core::ContractPricing,
+    execution: agora_core::ContractExecution,
+    dispute_terms: agora_core::ContractDisputeTerms,
+}
+
+async fn propose_contract(
+    State(state): State<Arc<GatewayState>>,
+    Json(payload): Json<ProposeContractPayload>,
+) -> Response {
+    let now = chrono::Utc::now().to_rfc3339();
+    let contract_id = format!("ctr-{}", uuid::Uuid::new_v4());
+
+    let contract = agora_core::AgenticContract {
+        id: contract_id.clone(),
+        version: "1.0".to_string(),
+        parties: payload.parties,
+        pricing: payload.pricing,
+        execution: payload.execution,
+        dispute_terms: payload.dispute_terms,
+        status: agora_core::ContractStatus::Proposed,
+        output_payload: None,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    let mut contracts = state.contracts.write().await;
+    contracts.insert(contract_id, contract.clone());
+
+    (StatusCode::CREATED, Json(contract)).into_response()
+}
+
+async fn get_contract(State(state): State<Arc<GatewayState>>, Path(id): Path<String>) -> Response {
+    let contracts = state.contracts.read().await;
+    match contracts.get(&id) {
+        Some(contract) => Json(contract.clone()).into_response(),
+        None => (StatusCode::NOT_FOUND, format!("contract not found: {id}")).into_response(),
+    }
+}
+
+async fn list_contracts(
+    State(state): State<Arc<GatewayState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let party_filter = params.get("party");
+    let contracts = state.contracts.read().await;
+
+    let filtered: Vec<agora_core::AgenticContract> = contracts
+        .values()
+        .filter(|c| {
+            if let Some(party) = party_filter {
+                &c.parties.requester == party
+                    || &c.parties.worker == party
+                    || c.parties.recommender.as_deref() == Some(party)
+            } else {
+                true
+            }
+        })
+        .cloned()
+        .collect();
+
+    Json(json!({ "contracts": filtered })).into_response()
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AcceptContractPayload {
+    #[serde(default)]
+    worker_signature: Option<String>,
+}
+
+async fn accept_contract(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<AcceptContractPayload>,
+) -> Response {
+    let mut contracts = state.contracts.write().await;
+    let Some(contract) = contracts.get_mut(&id) else {
+        return (StatusCode::NOT_FOUND, format!("contract not found: {id}")).into_response();
+    };
+
+    if contract.status != agora_core::ContractStatus::Proposed {
+        return (
+            StatusCode::CONFLICT,
+            format!(
+                "contract is not in proposed state (current: {:?})",
+                contract.status
+            ),
+        )
+            .into_response();
+    }
+
+    if let Some(sig) = payload.worker_signature {
+        contract.parties.worker_signature = Some(sig);
+    }
+    contract.status = agora_core::ContractStatus::AcceptedLocked;
+    contract.updated_at = chrono::Utc::now().to_rfc3339();
+
+    Json(contract.clone()).into_response()
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeliverContractPayload {
+    output_payload: serde_json::Value,
+}
+
+async fn deliver_contract(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<DeliverContractPayload>,
+) -> Response {
+    let mut contracts = state.contracts.write().await;
+    let Some(contract) = contracts.get_mut(&id) else {
+        return (StatusCode::NOT_FOUND, format!("contract not found: {id}")).into_response();
+    };
+
+    if contract.status != agora_core::ContractStatus::AcceptedLocked
+        && contract.status != agora_core::ContractStatus::Executing
+    {
+        return (
+            StatusCode::CONFLICT,
+            format!(
+                "contract cannot accept delivery in state {:?}",
+                contract.status
+            ),
+        )
+            .into_response();
+    }
+
+    contract.output_payload = Some(payload.output_payload);
+    contract.status = agora_core::ContractStatus::Delivered;
+    contract.updated_at = chrono::Utc::now().to_rfc3339();
+
+    Json(contract.clone()).into_response()
+}
+
+async fn evaluate_contract_acceptance(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let contracts = state.contracts.read().await;
+    let Some(contract) = contracts.get(&id) else {
+        return (StatusCode::NOT_FOUND, format!("contract not found: {id}")).into_response();
+    };
+
+    let Some(output) = &contract.output_payload else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "no output delivered yet for this contract",
+        )
+            .into_response();
+    };
+
+    // Evaluate against acceptance criteria prompt
+    let prompt_lower = contract.execution.acceptance_criteria.prompt.to_lowercase();
+    let is_empty = output.is_null()
+        || (output.is_string() && output.as_str().unwrap().trim().is_empty())
+        || (output.is_object() && output.as_object().unwrap().is_empty());
+
+    let (result, rationale, quality_score) = if is_empty {
+        (
+            agora_core::AcceptanceEvaluationResult::False,
+            "Output payload is empty or invalid".to_string(),
+            0.0,
+        )
+    } else if prompt_lower.contains("strict") && output.get("error").is_some() {
+        (
+            agora_core::AcceptanceEvaluationResult::False,
+            "Output contains error field violating strict acceptance".to_string(),
+            10.0,
+        )
+    } else if prompt_lower.contains("uncertain") || prompt_lower.contains("review") {
+        (
+            agora_core::AcceptanceEvaluationResult::Uncertain,
+            "Evaluation prompt requires manual human or referee review".to_string(),
+            60.0,
+        )
+    } else {
+        (
+            agora_core::AcceptanceEvaluationResult::True,
+            "Output passes all structured acceptance criteria".to_string(),
+            95.0,
+        )
+    };
+
+    Json(agora_core::AcceptanceEvaluation {
+        contract_id: id,
+        result,
+        rationale,
+        quality_score,
+    })
+    .into_response()
+}
+
+async fn settle_contract(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let mut contracts = state.contracts.write().await;
+    let Some(contract) = contracts.get_mut(&id) else {
+        return (StatusCode::NOT_FOUND, format!("contract not found: {id}")).into_response();
+    };
+
+    if contract.status != agora_core::ContractStatus::Delivered {
+        return (
+            StatusCode::CONFLICT,
+            format!(
+                "contract must be in delivered state to settle (current: {:?})",
+                contract.status
+            ),
+        )
+            .into_response();
+    }
+
+    contract.status = agora_core::ContractStatus::Settled;
+    contract.updated_at = chrono::Utc::now().to_rfc3339();
+
+    // Settle trust graph: +1 Goma to worker
+    let _ = state
+        .registry
+        .record_trust_interaction(
+            &contract.parties.requester,
+            &contract.parties.worker,
+            1,
+            0.0,
+            0,
+            0.0,
+        )
+        .await;
+
+    // Settle recommender if present: +1 Recom Goma
+    if let Some(recom) = &contract.parties.recommender {
+        if recom != &contract.parties.requester && recom != &contract.parties.worker {
+            let _ = state
+                .registry
+                .record_trust_interaction(&contract.parties.requester, recom, 0, 0.0, 1, 0.0)
+                .await;
+        }
+    }
+
+    Json(contract.clone()).into_response()
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DisputeContractPayload {
+    reason: String,
+}
+
+async fn dispute_contract(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<DisputeContractPayload>,
+) -> Response {
+    let mut contracts = state.contracts.write().await;
+    let Some(contract) = contracts.get_mut(&id) else {
+        return (StatusCode::NOT_FOUND, format!("contract not found: {id}")).into_response();
+    };
+
+    contract.status = agora_core::ContractStatus::Disputed;
+    contract.dispute_terms.dispute_reason = Some(payload.reason);
+    contract.updated_at = chrono::Utc::now().to_rfc3339();
+
+    Json(contract.clone()).into_response()
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ArbitrateContractPayload {
+    arbitrator: String,
+    verdict: agora_core::ArbitrationVerdict,
+    rationale: String,
+}
+
+async fn arbitrate_contract(
+    State(state): State<Arc<GatewayState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<ArbitrateContractPayload>,
+) -> Response {
+    let mut contracts = state.contracts.write().await;
+    let Some(contract) = contracts.get_mut(&id) else {
+        return (StatusCode::NOT_FOUND, format!("contract not found: {id}")).into_response();
+    };
+
+    contract.dispute_terms.arbitrator = Some(payload.arbitrator.clone());
+    contract.dispute_terms.arbitration_verdict = Some(format!("{:?}", payload.verdict));
+    contract.updated_at = chrono::Utc::now().to_rfc3339();
+
+    let price = contract.pricing.service_price_gduck;
+    let dispute_fee = contract.pricing.dispute_cost_gduck;
+
+    let (
+        worker_payout,
+        requester_refund,
+        dispute_fee_paid_by,
+        worker_plomo,
+        requester_plomo,
+        recom_plomo,
+    ) = match payload.verdict {
+        agora_core::ArbitrationVerdict::WorkerWins => {
+            // Requester opened frivolous dispute. Worker gets paid, Requester pays dispute fee.
+            contract.status = agora_core::ContractStatus::ResolvedWorkerWins;
+            (
+                price,
+                0.0,
+                contract.parties.requester.clone(),
+                0.0,
+                1.0,
+                0.0,
+            )
+        }
+        agora_core::ArbitrationVerdict::RequesterWins => {
+            // Worker defrauded/failed. Requester refunded, Worker pays dispute fee.
+            contract.status = agora_core::ContractStatus::ResolvedRequesterWins;
+            (
+                0.0,
+                price,
+                contract.parties.worker.clone(),
+                contract.dispute_terms.plomo_penalty,
+                0.0,
+                1.5,
+            )
+        }
+        agora_core::ArbitrationVerdict::Split => {
+            contract.status = agora_core::ContractStatus::ResolvedWorkerWins;
+            (price / 2.0, price / 2.0, "split".to_string(), 0.5, 0.5, 0.0)
+        }
+    };
+
+    // Update graph with loser-pays Plomo / Goma
+    if payload.verdict == agora_core::ArbitrationVerdict::WorkerWins {
+        // Worker delivered: +1 Goma to worker, +1 Plomo to requester
+        let _ = state
+            .registry
+            .record_trust_interaction(
+                &contract.parties.requester,
+                &contract.parties.worker,
+                1,
+                0.0,
+                0,
+                0.0,
+            )
+            .await;
+        let _ = state
+            .registry
+            .record_trust_interaction(
+                &contract.parties.worker,
+                &contract.parties.requester,
+                0,
+                requester_plomo,
+                0,
+                0.0,
+            )
+            .await;
+    } else if payload.verdict == agora_core::ArbitrationVerdict::RequesterWins {
+        // Worker penalized with 2.0 Plomo
+        let _ = state
+            .registry
+            .record_trust_interaction(
+                &contract.parties.requester,
+                &contract.parties.worker,
+                0,
+                worker_plomo,
+                0,
+                0.0,
+            )
+            .await;
+        // Penalize recommender if present
+        if let Some(recom) = &contract.parties.recommender {
+            let _ = state
+                .registry
+                .record_trust_interaction(
+                    &contract.parties.requester,
+                    recom,
+                    0,
+                    0.0,
+                    0,
+                    recom_plomo,
+                )
+                .await;
+        }
+    }
+
+    Json(agora_core::ArbitrationSettlement {
+        contract_id: id,
+        verdict: payload.verdict,
+        arbitrator: payload.arbitrator,
+        rationale: payload.rationale,
+        worker_payout_gduck: worker_payout,
+        requester_refund_gduck: requester_refund,
+        dispute_fee_paid_by,
+        dispute_fee_amount_gduck: dispute_fee,
+        worker_plomo_delta: worker_plomo,
+        requester_plomo_delta: requester_plomo,
+        recommender_plomo_delta: recom_plomo,
+    })
+    .into_response()
 }

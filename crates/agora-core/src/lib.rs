@@ -19,6 +19,7 @@
 //! marketplace/economy logic.
 
 pub mod a2a;
+pub mod contract;
 pub mod crypto;
 pub mod dead_letter;
 pub mod envelope;
@@ -33,6 +34,11 @@ pub mod trust;
 pub use a2a::{
     AgentCapabilities, AgentCard, AgentProvider, AgentService, AgentSkill, Message, MessageRole,
     Part, ServicePricing, Task, TaskState,
+};
+pub use contract::{
+    AcceptanceCriteria, AcceptanceEvaluation, AcceptanceEvaluationResult, AgenticContract,
+    ArbitrationSettlement, ArbitrationVerdict, ContractDisputeTerms, ContractExecution,
+    ContractParties, ContractPricing, ContractStatus,
 };
 pub use crypto::{
     canonical_signing_bytes, seal_payload, sign_envelope, unseal_payload,

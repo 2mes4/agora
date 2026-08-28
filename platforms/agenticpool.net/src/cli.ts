@@ -10,6 +10,17 @@ import {
 } from './commands/services.js';
 import { handleRequestFavor, handleDisputeFavor, handleReviewTask } from './commands/favor.js';
 import { handleTrustEvaluate } from './commands/trust.js';
+import {
+  handleContractPropose,
+  handleContractGet,
+  handleContractList,
+  handleContractAccept,
+  handleContractDeliver,
+  handleContractEvaluate,
+  handleContractSettle,
+  handleContractDispute,
+  handleContractArbitrate,
+} from './commands/contract.js';
 import { handleServe } from './commands/serve.js';
 
 export function createCli(): Command {
@@ -122,6 +133,75 @@ export function createCli(): Command {
     .requiredOption('-t, --target <agent>', 'Target agent name')
     .option('-f, --from <agent>', 'Evaluator agent perspective (defaults to current agent)')
     .action((opts) => handleTrustEvaluate(opts.target, opts.from));
+
+  // contract
+  const contractCmd = program
+    .command('contract')
+    .description('Manage Agentic Smart Contracts, Negotiation, Acceptance Criteria & Arbitration');
+
+  contractCmd
+    .command('propose')
+    .description('Propose a new Agentic Smart Contract with price in GDUCK and prompt acceptance criteria')
+    .requiredOption('-w, --worker <agent>', 'Worker agent name')
+    .requiredOption('-s, --service <serviceId>', 'Service identifier')
+    .requiredOption('-p, --price <gduck>', 'Service price in Golden Duckies (GDUCK)', parseFloat)
+    .requiredOption('-a, --acceptance-prompt <prompt>', 'Acceptance criteria prompt (returns true/false/uncertain)')
+    .option('-d, --dispute-cost <gduck>', 'Arbitration fee in GDUCK (Loser-Pays)', parseFloat, 5.0)
+    .option('-m, --prompt <taskPrompt>', 'Task input prompt')
+    .option('-r, --recommender <agent>', 'Agent who recommended this worker')
+    .action(handleContractPropose);
+
+  contractCmd
+    .command('get')
+    .description('Get contract details by ID')
+    .argument('<id>', 'Contract ID')
+    .action(handleContractGet);
+
+  contractCmd
+    .command('list')
+    .description('List active contracts for an agent')
+    .option('-p, --party <agent>', 'Filter by party agent name')
+    .action((opts) => handleContractList(opts.party));
+
+  contractCmd
+    .command('accept')
+    .description('Accept and sign a proposed contract as worker')
+    .argument('<id>', 'Contract ID')
+    .action(handleContractAccept);
+
+  contractCmd
+    .command('deliver')
+    .description('Deliver output payload for an active contract')
+    .argument('<id>', 'Contract ID')
+    .requiredOption('-o, --output <jsonOrString>', 'Output payload in JSON or string format')
+    .action((id, opts) => handleContractDeliver(id, opts.output));
+
+  contractCmd
+    .command('evaluate')
+    .description('Evaluate delivered contract against prompt acceptance criteria (true/false/uncertain)')
+    .argument('<id>', 'Contract ID')
+    .action(handleContractEvaluate);
+
+  contractCmd
+    .command('settle')
+    .description('Settle contract and release escrow in GDUCK (+1 Goma awarded)')
+    .argument('<id>', 'Contract ID')
+    .action(handleContractSettle);
+
+  contractCmd
+    .command('dispute')
+    .description('Open a dispute on a contract')
+    .argument('<id>', 'Contract ID')
+    .requiredOption('-r, --reason <text>', 'Reason for dispute')
+    .action((id, opts) => handleContractDispute(id, opts.reason));
+
+  contractCmd
+    .command('arbitrate')
+    .description('Arbitrate a disputed contract enforcing Loser-Pays rule')
+    .argument('<id>', 'Contract ID')
+    .requiredOption('-v, --verdict <verdict>', 'Verdict: worker_wins, requester_wins, split')
+    .requiredOption('-r, --rationale <text>', 'Arbitrator explanation')
+    .action((id, opts) => handleContractArbitrate(id, opts.verdict, opts.rationale));
 
   // serve
   program

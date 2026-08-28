@@ -179,6 +179,105 @@ export class DirectoryClient {
     );
   }
 
+  /**
+   * Propose a new Agentic Smart Contract.
+   */
+  async proposeContract(payload: {
+    parties: import('./types.js').ContractParties;
+    pricing: import('./types.js').ContractPricing;
+    execution: import('./types.js').ContractExecution;
+    disputeTerms: import('./types.js').ContractDisputeTerms;
+  }): Promise<import('./types.js').AgenticContract> {
+    return this.fetchJson<import('./types.js').AgenticContract>(`${this.gatewayUrl}/v1/contracts`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  /**
+   * Get an Agentic Contract by ID.
+   */
+  async getContract(id: string): Promise<import('./types.js').AgenticContract> {
+    return this.fetchJson<import('./types.js').AgenticContract>(`${this.gatewayUrl}/v1/contracts/${id}`);
+  }
+
+  /**
+   * List contracts, optionally filtered by party.
+   */
+  async listContracts(party?: string): Promise<import('./types.js').AgenticContract[]> {
+    const url = new URL(`${this.gatewayUrl}/v1/contracts`);
+    if (party) {
+      url.searchParams.set('party', party);
+    }
+    const res = await this.fetchJson<{ contracts: import('./types.js').AgenticContract[] }>(url.toString());
+    return res.contracts;
+  }
+
+  /**
+   * Worker accepts and signs a proposed contract.
+   */
+  async acceptContract(id: string, workerSignature?: string): Promise<import('./types.js').AgenticContract> {
+    return this.fetchJson<import('./types.js').AgenticContract>(`${this.gatewayUrl}/v1/contracts/${id}/accept`, {
+      method: 'POST',
+      body: JSON.stringify({ workerSignature }),
+    });
+  }
+
+  /**
+   * Worker delivers the execution output payload.
+   */
+  async deliverContract(id: string, outputPayload: Record<string, any>): Promise<import('./types.js').AgenticContract> {
+    return this.fetchJson<import('./types.js').AgenticContract>(`${this.gatewayUrl}/v1/contracts/${id}/deliver`, {
+      method: 'POST',
+      body: JSON.stringify({ outputPayload }),
+    });
+  }
+
+  /**
+   * Evaluate contract delivery against acceptance criteria prompt (returns true/false/uncertain).
+   */
+  async evaluateContractAcceptance(id: string): Promise<import('./types.js').AcceptanceEvaluation> {
+    return this.fetchJson<import('./types.js').AcceptanceEvaluation>(`${this.gatewayUrl}/v1/contracts/${id}/evaluate`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Requester settles a delivered contract (+1 Goma awarded).
+   */
+  async settleContract(id: string): Promise<import('./types.js').AgenticContract> {
+    return this.fetchJson<import('./types.js').AgenticContract>(`${this.gatewayUrl}/v1/contracts/${id}/settle`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Open a dispute on a contract.
+   */
+  async disputeContract(id: string, reason: string): Promise<import('./types.js').AgenticContract> {
+    return this.fetchJson<import('./types.js').AgenticContract>(`${this.gatewayUrl}/v1/contracts/${id}/dispute`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  /**
+   * Arbitrator resolves a disputed contract enforcing the Loser-Pays rule.
+   */
+  async arbitrateContract(
+    id: string,
+    params: {
+      arbitrator: string;
+      verdict: import('./types.js').ArbitrationVerdict;
+      rationale: string;
+    }
+  ): Promise<import('./types.js').ArbitrationSettlement> {
+    return this.fetchJson<import('./types.js').ArbitrationSettlement>(`${this.gatewayUrl}/v1/contracts/${id}/arbitrate`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
   private async fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',

@@ -239,4 +239,54 @@ export class Agent {
       recommender: options?.recommender,
     });
   }
+
+  /**
+   * Propose a smart contract to another agent from this agent.
+   */
+  async proposeContract(params: {
+    worker: string;
+    recommender?: string;
+    pricing: import('./types.js').ContractPricing;
+    execution: import('./types.js').ContractExecution;
+    disputeTerms: import('./types.js').ContractDisputeTerms;
+  }): Promise<import('./types.js').AgenticContract> {
+    return this.directory.proposeContract({
+      parties: {
+        requester: this.name,
+        worker: params.worker,
+        recommender: params.recommender,
+      },
+      pricing: params.pricing,
+      execution: params.execution,
+      disputeTerms: params.disputeTerms,
+    });
+  }
+
+  /**
+   * Accept an incoming contract proposed to this agent.
+   */
+  async acceptContract(id: string): Promise<import('./types.js').AgenticContract> {
+    return this.directory.acceptContract(id);
+  }
+
+  /**
+   * Deliver output for an active contract executed by this agent.
+   */
+  async deliverContract(id: string, outputPayload: Record<string, any>): Promise<import('./types.js').AgenticContract> {
+    return this.directory.deliverContract(id, outputPayload);
+  }
+
+  /**
+   * Settle a delivered contract after acceptance criteria pass.
+   */
+  async settleContract(id: string): Promise<import('./types.js').AgenticContract> {
+    return this.directory.settleContract(id);
+  }
+
+  /**
+   * Dispute a contract delivery.
+   */
+  async disputeContract(id: string, reason: string): Promise<import('./types.js').AgenticContract> {
+    return this.directory.disputeContract(id, reason);
+  }
 }
