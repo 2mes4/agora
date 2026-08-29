@@ -19,6 +19,25 @@ describe('AgenticPool Client', () => {
         return;
       }
 
+      if (url.pathname === '/v1/agents/translator-bot' && req.method === 'GET') {
+        res.writeHead(200);
+        res.end(
+          JSON.stringify({
+            name: 'translator-bot',
+            description: 'Autonomous translation agent',
+            services: [
+              {
+                id: 'translate.text',
+                name: 'Text Translator',
+                tags: ['translation', 'text'],
+                pricing: { amount: 5.0, currency: 'DUCKIES', model: 'per_call' },
+              },
+            ],
+          })
+        );
+        return;
+      }
+
       if (url.pathname === '/v1/services' && req.method === 'GET') {
         res.writeHead(200);
         res.end(
@@ -208,6 +227,17 @@ describe('AgenticPool Client', () => {
       },
     ]);
     assert.equal(res.status, 'created');
+  });
+
+  test('gets agent card from gateway directory', async () => {
+    const agent = await client.getAgent('translator-bot');
+    assert.ok(agent);
+    assert.equal(agent.name, 'translator-bot');
+    assert.equal(agent.services.length, 1);
+    assert.equal(agent.services[0].id, 'translate.text');
+
+    const notFound = await client.getAgent('nonexistent-agent');
+    assert.equal(notFound, null);
   });
 
   test('lists marketplace services', async () => {

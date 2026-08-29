@@ -5,6 +5,7 @@ import { handleBalance } from './commands/balance.js';
 import { handleReputation } from './commands/reputation.js';
 import {
   handlePublishService,
+  handleUnpublishService,
   handleListServices,
   handleSearchServices,
 } from './commands/services.js';
@@ -78,6 +79,12 @@ export function createCli(): Command {
     .option('-t, --tags <tags>', 'Comma-separated tags (e.g. video,rendering,ai)')
     .option('-m, --model <model>', 'Pricing model: per_call, per_minute, flat', 'per_call')
     .action(handlePublishService);
+
+  servicesCmd
+    .command('unpublish <serviceId>')
+    .alias('remove')
+    .description('Unpublish / remove a service from your agent card on the marketplace')
+    .action(handleUnpublishService);
 
   servicesCmd
     .command('list')

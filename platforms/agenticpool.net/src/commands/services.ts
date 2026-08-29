@@ -23,10 +23,43 @@ export async function handlePublishService(options: {
   };
 
   try {
+    const existingCard = await client.getAgent(credentials.agentName);
+    let mergedServices: PublishedService[] = [];
+    let agentDesc = `Autonomous agent offering ${service.name}`;
+
+    if (existingCard) {
+      if (existingCard.description) {
+        agentDesc = existingCard.description;
+      }
+      if (Array.isArray(existingCard.services)) {
+        const prevServices: PublishedService[] = existingCard.services.map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          tags: s.tags || [],
+          priceDuckies: s.pricing?.amount ?? s.priceDuckies ?? 0,
+          pricingModel: s.pricing?.model ?? s.pricingModel ?? 'per_call',
+          skillId: s.skillId,
+        }));
+
+        const existingIndex = prevServices.findIndex((s) => s.id === service.id);
+        if (existingIndex >= 0) {
+          prevServices[existingIndex] = service;
+        } else {
+          prevServices.push(service);
+        }
+        mergedServices = prevServices;
+      } else {
+        mergedServices = [service];
+      }
+    } else {
+      mergedServices = [service];
+    }
+
     await client.registerAgent(
       credentials.agentName,
-      `Autonomous agent offering ${service.name}`,
-      [service]
+      agentDesc,
+      mergedServices
     );
 
     console.log(`\n✅ Service Published to AgenticPool Marketplace!`);
@@ -35,10 +68,54 @@ export async function handlePublishService(options: {
     console.log(`🏷️ Name:          ${service.name}`);
     console.log(`💰 Price:         ${service.priceDuckies} DUCKIES (${service.pricingModel})`);
     console.log(`🏷️ Tags:          ${service.tags.join(', ') || 'none'}`);
-    console.log(`🤖 Offering Agent:${credentials.agentName}\n`);
+    console.log(`🤖 Offering Agent:${credentials.agentName}`);
+    console.log(`📦 Active Services (${mergedServices.length}): ${mergedServices.map((s) => s.id).join(', ')}\n`);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`❌ Failed to publish service: ${msg}`);
+  }
+}
+
+export async function handleUnpublishService(serviceId: string): Promise<void> {
+  const credentials = loadCredentials();
+  const client = new AgenticPoolClient({ credentials });
+
+  try {
+    const existingCard = await client.getAgent(credentials.agentName);
+    if (!existingCard || !Array.isArray(existingCard.services)) {
+      console.log(`⚠️ No services found registered for agent '${credentials.agentName}'.`);
+      return;
+    }
+
+    const prevServices: PublishedService[] = existingCard.services.map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      tags: s.tags || [],
+      priceDuckies: s.pricing?.amount ?? s.priceDuckies ?? 0,
+      pricingModel: s.pricing?.model ?? s.pricingModel ?? 'per_call',
+      skillId: s.skillId,
+    }));
+
+    const filtered = prevServices.filter((s) => s.id !== serviceId);
+    if (filtered.length === prevServices.length) {
+      console.log(`⚠️ Service ID '${serviceId}' not found in active services of agent '${credentials.agentName}'.`);
+      return;
+    }
+
+    await client.registerAgent(
+      credentials.agentName,
+      existingCard.description || `Autonomous agent ${credentials.agentName}`,
+      filtered
+    );
+
+    console.log(`\n🗑️ Service '${serviceId}' unpublished successfully.`);
+    console.log(`=========================================`);
+    console.log(`🤖 Offering Agent:${credentials.agentName}`);
+    console.log(`📦 Remaining Services (${filtered.length}): ${filtered.map((s) => s.id).join(', ') || 'none'}\n`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`❌ Failed to unpublish service: ${msg}`);
   }
 }
 

@@ -76,6 +76,17 @@ export class AgenticPoolClient {
   }
 
   /**
+   * Fetch an agent card by name from the Gateway directory.
+   */
+  async getAgent(name: string): Promise<any | null> {
+    try {
+      return await this.getJson(`${this.gatewayUrl}/v1/agents/${encodeURIComponent(name)}`);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * List all published services in the pool.
    */
   async listServices(options?: { onlineOnly?: boolean }): Promise<any[]> {

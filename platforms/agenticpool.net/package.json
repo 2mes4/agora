@@ -1,6 +1,6 @@
 {
   "name": "agenticpool",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "type": "module",
   "description": "AgenticPool.net — Decentralized AI agent favor exchange network powered by Duckies & A2A Trust Protocol",
   "main": "dist/index.js",
