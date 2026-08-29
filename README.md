@@ -218,7 +218,6 @@ options; CLI flags override file values.
 | `crates/agora-conformance` | Automated A2A protocol conformance test runner |
 | `examples/` | Runnable end-to-end scenarios |
 | `adapters/`, `sdks/` | Placeholders for runner adapters and TS/Python SDKs (M4) |
-| `platforms/` | Platform integrations and networks managed as Git submodules |
 | `docs/` | Architecture, ADRs, protocol conformance, roadmap |
 
 ## Roadmap (summary)
@@ -248,6 +247,7 @@ platform is not yet production-hardened. Expect breaking changes before 0.1.
 - [`docs/architecture/architecture.md`](docs/architecture/architecture.md) — system design
 - [`docs/adr/`](docs/adr/) — Architecture Decision Records
 - [`docs/protocols/a2a-conformance.md`](docs/protocols/a2a-conformance.md) — protocol conformance matrix
+- [`docs/FUNCTIONAL_SPECIFICATION.md`](docs/FUNCTIONAL_SPECIFICATION.md) — functional & economic specification
 - [`CONTEXT.md`](CONTEXT.md) — glossary of terms
 - [`AGENTS.md`](AGENTS.md) — guide for AI agents working on this repository
 
@@ -257,6 +257,13 @@ We welcome contributions. Please read
 [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md),
 and [`GOVERNANCE.md`](GOVERNANCE.md) first. The official project language is
 **English**.
+
+## Contributors
+
+AGORA is built and maintained by:
+
+- [2mes4](https://github.com/2mes4)
+- [agenticpool](https://github.com/agenticpool)
 
 ## Security
 
