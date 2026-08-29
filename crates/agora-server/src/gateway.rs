@@ -311,6 +311,17 @@ struct SearchQueryParams {
     hits_per_page: Option<usize>,
 }
 
+fn currency_matches(svc_curr: &str, query_curr: &str) -> bool {
+    if svc_curr.is_empty() || query_curr.is_empty() {
+        return true;
+    }
+    if svc_curr.eq_ignore_ascii_case(query_curr) {
+        return true;
+    }
+    let is_duck = |c: &str| c.eq_ignore_ascii_case("DUCKIES") || c.eq_ignore_ascii_case("GDUCK");
+    is_duck(svc_curr) && is_duck(query_curr)
+}
+
 async fn search_services(
     State(state): State<Arc<GatewayState>>,
     Query(params): Query<SearchQueryParams>,
@@ -367,7 +378,7 @@ async fn search_services(
                             .get("currency")
                             .and_then(|v| v.as_str())
                             .unwrap_or_default();
-                        if !hit_curr.eq_ignore_ascii_case(curr) {
+                        if !currency_matches(hit_curr, curr) {
                             continue;
                         }
                     }
@@ -382,14 +393,16 @@ async fn search_services(
                     }));
                 }
 
-                return Json(json!({
-                    "engine": "llull",
-                    "query": query,
-                    "page": llull_resp.page,
-                    "totalHits": enriched_hits.len(),
-                    "hits": enriched_hits,
-                }))
-                .into_response();
+                if !enriched_hits.is_empty() {
+                    return Json(json!({
+                        "engine": "llull",
+                        "query": query,
+                        "page": llull_resp.page,
+                        "totalHits": enriched_hits.len(),
+                        "hits": enriched_hits,
+                    }))
+                    .into_response();
+                }
             }
             Err(err) => {
                 warn!(error = %err, "llull search failed, falling back to local registry search");
@@ -400,6 +413,7 @@ async fn search_services(
     // Fallback search when Llull is unset or unreachable
     let all_services = state.registry.list_services().await;
     let query_lower = query.to_lowercase();
+    let words: Vec<&str> = query_lower.split_whitespace().collect();
     let matching: Vec<_> = all_services
         .into_iter()
         .filter(|listing| {
@@ -412,28 +426,27 @@ async fn search_services(
                 }
             }
             if let Some(curr) = &params.currency {
-                if !listing.service.pricing.currency.eq_ignore_ascii_case(curr) {
+                if !currency_matches(&listing.service.pricing.currency, curr) {
                     return false;
                 }
             }
-            if query_lower.is_empty() {
+            if words.is_empty() {
                 return true;
             }
-            listing.service.name.to_lowercase().contains(&query_lower)
-                || listing.service.id.to_lowercase().contains(&query_lower)
-                || listing
+            let searchable = format!(
+                "{} {} {} {} {}",
+                listing.service.name.to_lowercase(),
+                listing.service.id.to_lowercase(),
+                listing
                     .service
                     .description
                     .as_deref()
                     .unwrap_or("")
-                    .to_lowercase()
-                    .contains(&query_lower)
-                || listing
-                    .service
-                    .tags
-                    .iter()
-                    .any(|t| t.to_lowercase().contains(&query_lower))
-                || listing.agent_name.to_lowercase().contains(&query_lower)
+                    .to_lowercase(),
+                listing.service.tags.join(" ").to_lowercase(),
+                listing.agent_name.to_lowercase(),
+            );
+            words.iter().all(|w| searchable.contains(w))
         })
         .map(|listing| {
             json!({
