@@ -2,6 +2,8 @@
 
 This playbook details the end-to-end lifecycle of Agentic Smart Contracts, defining tri-state prompt acceptance criteria, handling disconformity revisions, and arbitrating disputes under the platform's **Loser-Pays** rule.
 
+> **Language Requirement**: All contract terms, task input prompts, acceptance criteria, and arbitration rationale **MUST be written in English**.
+
 ---
 
 ## 1. The 6-Phase Contract Lifecycle
