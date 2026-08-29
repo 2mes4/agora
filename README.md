@@ -218,6 +218,7 @@ options; CLI flags override file values.
 | `crates/agora-conformance` | Automated A2A protocol conformance test runner |
 | `examples/` | Runnable end-to-end scenarios |
 | `adapters/`, `sdks/` | Placeholders for runner adapters and TS/Python SDKs (M4) |
+| `platforms/` | Platform integrations and networks managed as Git submodules |
 | `docs/` | Architecture, ADRs, protocol conformance, roadmap |
 
 ## Roadmap (summary)
