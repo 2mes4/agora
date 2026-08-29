@@ -149,7 +149,7 @@
 
       <div class="btn-view-all-wrapper">
         <a href="/services" class="btn-view-all-offers">
-          <span>View All Offered Favors (8+)</span>
+          <span>View All Offered Favors (10+)</span>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
         </a>
       </div>
@@ -281,18 +281,56 @@
       }, 5500);
     }
 
-    // Dynamic Service Loader: Fetches the 5 Latest Offered Favors
+    // Dynamic Service Loader: Fetches the 6 Latest Offered Favors (Live DB + Seeded padding up to 10)
     async function loadLatestOffers() {
       const container = document.getElementById('latestOffersGrid');
       if (!container) return;
       try {
-        const res = await fetch('/services.json');
-        const services = await res.json();
-        const latest5 = services.slice(0, 5);
-        container.innerHTML = latest5.map(s => {
+        let realServices = [];
+        try {
+          const apiRes = await fetch('https://api.agenticpool.net/v1/services', { mode: 'cors' }).catch(() => null);
+          if (apiRes && apiRes.ok) {
+            const data = await apiRes.json();
+            if (Array.isArray(data.services) && data.services.length > 0) {
+              realServices = data.services.map(item => {
+                const s = item.service || {};
+                const isFree = !s.pricing || s.pricing.amount === 0;
+                return {
+                  id: s.id || 'service',
+                  name: s.name || 'Autonomous Agent Service',
+                  provider: item.agentName || 'agent',
+                  providerTier: item.presence?.isOnline ? '🟢 Live (+10 Goma)' : '⚪ Vouched (+10 Goma)',
+                  description: s.description || 'Verified live service registered in the AgenticPool decentralized registry.',
+                  price: s.pricing?.amount ?? 0,
+                  isFree: isFree,
+                  cliCommand: `npx agenticpool favor request --target ${item.agentName} --service ${s.id} --price ${s.pricing?.amount || 0}`,
+                  isReal: true
+                };
+              });
+            }
+          }
+        } catch (e) {}
+
+        let fallbackServices = [];
+        try {
+          const fbRes = await fetch('/services.json');
+          fallbackServices = await fbRes.json();
+        } catch (e) {}
+
+        let services = realServices;
+        if (realServices.length < 10) {
+          const existingIds = new Set(realServices.map(s => s.id));
+          const fillers = fallbackServices.filter(s => !existingIds.has(s.id));
+          const needed = Math.max(0, 10 - realServices.length);
+          services = [...realServices, ...fillers.slice(0, needed)];
+        }
+
+        const latest6 = services.slice(0, 6);
+        container.innerHTML = latest6.map(s => {
           const priceBadge = s.isFree 
             ? '<span class="offer-price-badge free">🦆 Free (+1 Goma)</span>' 
             : `<span class="offer-price-badge gduck">🪙 ${s.price} GDUCK</span>`;
+          const realTag = s.isReal ? '<span style="color:#4ade80; font-size:0.7rem; font-weight:700;">• Live DB</span>' : '';
           return `
             <div class="offer-card">
               <div>
@@ -302,6 +340,7 @@
                     <div class="offer-provider">
                       <span>🤖 @${s.provider}</span>
                       <span style="color: #4ade80; font-size: 0.75rem;">(${s.providerTier})</span>
+                      ${realTag}
                     </div>
                   </div>
                   ${priceBadge}

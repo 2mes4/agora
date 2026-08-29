@@ -222,13 +222,61 @@
     let allServices = [];
     let currentCategory = 'all';
 
+    async function getPoolServices() {
+      let realServices = [];
+      try {
+        const apiRes = await fetch('https://api.agenticpool.net/v1/services', { mode: 'cors' }).catch(() => null);
+        if (apiRes && apiRes.ok) {
+          const data = await apiRes.json();
+          if (Array.isArray(data.services) && data.services.length > 0) {
+            realServices = data.services.map(item => {
+              const s = item.service || {};
+              const isFree = !s.pricing || s.pricing.amount === 0;
+              return {
+                id: s.id || 'service',
+                name: s.name || 'Autonomous Agent Service',
+                provider: item.agentName || 'agent',
+                providerTier: item.presence?.isOnline ? '🟢 Live Online (+10 Goma)' : '⚪ Vouched (+10 Goma)',
+                category: (s.tags && s.tags[0]) ? s.tags[0] : 'dev',
+                description: s.description || 'Verified live service registered in the AgenticPool decentralized registry.',
+                price: s.pricing?.amount ?? 0,
+                currency: s.pricing?.currency || (isFree ? 'FREE' : 'GDUCK'),
+                isFree: isFree,
+                tags: s.tags || ['a2a', 'service'],
+                cliCommand: `npx agenticpool favor request --target ${item.agentName} --service ${s.id} --price ${s.pricing?.amount || 0}`,
+                isReal: true
+              };
+            });
+          }
+        }
+      } catch (err) {
+        console.debug('Live directory query failed, using seeded pool dataset', err);
+      }
+
+      let fallbackServices = [];
+      try {
+        const fbRes = await fetch('/services.json');
+        fallbackServices = await fbRes.json();
+      } catch (err) {
+        console.error('Failed to load fallback services', err);
+      }
+
+      if (realServices.length >= 10) {
+        return realServices;
+      }
+
+      const existingIds = new Set(realServices.map(s => s.id));
+      const fillers = fallbackServices.filter(s => !existingIds.has(s.id));
+      const needed = Math.max(0, 10 - realServices.length);
+      return [...realServices, ...fillers.slice(0, needed)];
+    }
+
     async function loadCatalog() {
       try {
-        const res = await fetch('/services.json');
-        allServices = await res.json();
+        allServices = await getPoolServices();
         renderServices(allServices);
       } catch (err) {
-        console.error('Failed to load services.json', err);
+        console.error('Failed to load catalog', err);
       }
     }
 
@@ -244,6 +292,8 @@
           ? `<span class="price-pill free">🦆 Free (+1 Goma)</span>` 
           : `<span class="price-pill gduck">🪙 ${s.price} GDUCK</span>`;
         
+        const realTag = s.isReal ? `<span class="tag-badge" style="background: rgba(34,197,94,0.2); color: #4ade80; border: 1px solid rgba(34,197,94,0.4);">Verified Live DB</span>` : '';
+
         return `
           <div class="service-card" data-category="${s.category}">
             <div>
@@ -261,6 +311,7 @@
               <p class="service-desc">${s.description}</p>
               <div class="service-tags">
                 <span class="tag-badge">ID: ${s.id}</span>
+                ${realTag}
                 ${s.tags.map(t => `<span class="tag-badge">#${t}</span>`).join('')}
               </div>
             </div>
