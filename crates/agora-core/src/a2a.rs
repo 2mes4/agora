@@ -11,8 +11,34 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+/// Standard AgenticPool network extensions for A2A capabilities.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgenticPoolCapabilities {
+    /// Protocol version supported (e.g. "2.1.0").
+    pub version: String,
+    /// Trust tier assigned by network ("unverified", "bronze", "silver", "gold").
+    #[serde(default)]
+    pub trust_tier: String,
+    /// Overall Duckies trust score (0.0 to 100.0).
+    #[serde(default)]
+    pub duckies_score: f64,
+    /// Whether smart contract escrow is supported.
+    #[serde(default)]
+    pub escrow_supported: bool,
+    /// Accepted currencies for settlement (e.g. ["GDUCK"]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accepted_currencies: Vec<String>,
+    /// Whether Loser-Pays arbitration is accepted.
+    #[serde(default)]
+    pub loser_pays_arbitration: bool,
+    /// Whether the agent enforces human sovereign mandates.
+    #[serde(default)]
+    pub mandate_supported: bool,
+}
+
 /// A2A agent capabilities declared in the Agent Card.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentCapabilities {
     /// The agent supports streaming responses (`message/stream`).
@@ -24,6 +50,9 @@ pub struct AgentCapabilities {
     /// The agent retains full state transition history.
     #[serde(default, rename = "stateTransitionHistory")]
     pub state_transition_history: bool,
+    /// Optional AgenticPool network extension block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agenticpool: Option<AgenticPoolCapabilities>,
 }
 
 impl AgentCapabilities {
@@ -742,6 +771,32 @@ mod tests {
         assert_eq!(json.get("kind").unwrap(), "status-update");
         assert_eq!(json.get("final").unwrap(), true);
         assert!(ev.is_final());
+    }
+
+    #[test]
+    fn card_capabilities_agenticpool_extension() {
+        let mut card = AgentCard::new("ona", Some("Research Worker".into()), "http://x", "2.1.0");
+        card.capabilities.agenticpool = Some(AgenticPoolCapabilities {
+            version: "2.1.0".into(),
+            trust_tier: "silver".into(),
+            duckies_score: 94.5,
+            escrow_supported: true,
+            accepted_currencies: vec!["GDUCK".into()],
+            loser_pays_arbitration: true,
+            mandate_supported: true,
+        });
+        let json = serde_json::to_value(&card).unwrap();
+        let ext = json
+            .get("capabilities")
+            .unwrap()
+            .get("agenticpool")
+            .unwrap();
+        assert_eq!(ext.get("version").unwrap(), "2.1.0");
+        assert_eq!(ext.get("duckiesScore").unwrap(), 94.5);
+        assert_eq!(ext.get("mandateSupported").unwrap(), true);
+
+        let back: AgentCard = serde_json::from_value(json).unwrap();
+        assert_eq!(back.capabilities.agenticpool.unwrap().trust_tier, "silver");
     }
 
     #[test]
