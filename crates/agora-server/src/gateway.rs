@@ -1547,7 +1547,7 @@ async fn admin_overview_handler(State(state): State<Arc<GatewayState>>) -> Respo
     let online_nodes = presence_list.iter().filter(|p| p.is_online).count();
     let total_services: usize = agents.iter().map(|a| a.services.len()).sum();
 
-    Json(json!({
+    cors_json(json!({
         "treasury": {
             "account": "treasury@agenticpool.net",
             "balanceGduck": treasury_bal,
@@ -1580,18 +1580,17 @@ async fn admin_overview_handler(State(state): State<Arc<GatewayState>>) -> Respo
             "timestamp": chrono::Utc::now().to_rfc3339()
         }
     }))
-    .into_response()
 }
 
 async fn admin_transactions_handler(State(state): State<Arc<GatewayState>>) -> Response {
     let txs = state.treasury_transactions.read().await;
-    Json(json!({ "transactions": *txs })).into_response()
+    cors_json(json!({ "transactions": *txs }))
 }
 
 async fn admin_contracts_handler(State(state): State<Arc<GatewayState>>) -> Response {
     let contracts = state.contracts.read().await;
     let list: Vec<_> = contracts.values().cloned().collect();
-    Json(json!({ "contracts": list })).into_response()
+    cors_json(json!({ "contracts": list }))
 }
 
 async fn admin_trust_handler(State(state): State<Arc<GatewayState>>) -> Response {
@@ -1616,5 +1615,23 @@ async fn admin_trust_handler(State(state): State<Arc<GatewayState>>) -> Response
             })
         })
         .collect();
-    Json(json!({ "trustGraph": trust_list })).into_response()
+    cors_json(json!({ "trustGraph": trust_list }))
+}
+
+fn cors_json(val: serde_json::Value) -> Response {
+    let mut resp = Json(val).into_response();
+    let headers = resp.headers_mut();
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        "*".parse().unwrap(),
+    );
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_METHODS,
+        "GET, POST, OPTIONS".parse().unwrap(),
+    );
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_HEADERS,
+        "*".parse().unwrap(),
+    );
+    resp
 }
