@@ -4,7 +4,7 @@
 //! or a PostgreSQL-backed set of stores when `--database-url` is configured
 //! (see `agora-store`). Hosted agents hydrate persisted tasks at mount time.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use agora_bus::MessageBus;
@@ -26,6 +26,21 @@ use serde_json::json;
 use tokio::sync::RwLock;
 use tracing::warn;
 
+/// A record in the protocol treasury transaction ledger.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TreasuryTransaction {
+    pub id: String,
+    pub timestamp: String,
+    pub tx_type: String, // "burn_fee", "arbitration_fee", "escrow_lock", "escrow_settle", "faucet_grant"
+    pub contract_id: Option<String>,
+    pub from: String,
+    pub to: String,
+    pub gross_amount_gduck: f64,
+    pub treasury_fee_gduck: f64,
+    pub description: String,
+}
+
 /// Shared gateway state.
 pub struct GatewayState {
     /// The agent directory.
@@ -46,6 +61,14 @@ pub struct GatewayState {
     pub llull: Option<Arc<agora_registry::LlullClient>>,
     /// In-memory & persisted Agentic Contracts.
     pub contracts: RwLock<HashMap<String, agora_core::AgenticContract>>,
+    /// Finite launch starter pool remaining balance (10,000 GDUCK total).
+    pub faucet_pool_remaining: RwLock<f64>,
+    /// Claimed IP addresses to enforce 1 grant per unique IP.
+    pub faucet_claimed_ips: RwLock<HashSet<String>>,
+    /// Protocol administration / treasury account balance.
+    pub treasury_balance: RwLock<f64>,
+    /// Protocol treasury transaction ledger.
+    pub treasury_transactions: RwLock<Vec<TreasuryTransaction>>,
 }
 
 /// The gateway node: a router + registry + hosted agents.
@@ -84,6 +107,10 @@ impl Gateway {
                 envelope_journal: backend.envelope_journal,
                 llull,
                 contracts: RwLock::new(HashMap::new()),
+                faucet_pool_remaining: RwLock::new(10_000.0),
+                faucet_claimed_ips: RwLock::new(HashSet::new()),
+                treasury_balance: RwLock::new(0.0),
+                treasury_transactions: RwLock::new(Vec::new()),
             }),
         }
     }
@@ -128,6 +155,7 @@ impl Gateway {
             .route("/v1/agents/{name}", get(get_agent).delete(remove_agent))
             .route("/v1/agents/{name}/heartbeat", post(heartbeat_agent))
             .route("/v1/agents/{name}/status", get(get_agent_status))
+            .route("/v1/faucet/claim", post(claim_faucet_handler))
             .route("/v1/services", get(list_services))
             .route("/v1/services/{service_id}", get(get_service_providers))
             .route("/v1/services/search", get(search_services))
@@ -161,6 +189,10 @@ impl Gateway {
             )
             .route("/v1/dead-letters/{id}/replay", post(replay_dead_letter))
             .route("/v1/journal", get(list_journal))
+            .route("/v1/admin/overview", get(admin_overview_handler))
+            .route("/v1/admin/transactions", get(admin_transactions_handler))
+            .route("/v1/admin/contracts", get(admin_contracts_handler))
+            .route("/v1/admin/trust", get(admin_trust_handler))
             .route("/a2a/{agent}", post(agent_jsonrpc))
             .route(
                 "/a2a/{agent}/.well-known/agent-card.json",
@@ -187,6 +219,7 @@ async fn list_agents(State(state): State<Arc<GatewayState>>) -> Json<serde_json:
 
 async fn register_agent(
     State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
     Json(card): Json<AgentCard>,
 ) -> Response {
     if card.name.is_empty() {
@@ -199,10 +232,103 @@ async fn register_agent(
                     let _ = llull.index_service(&card, service, true).await;
                 }
             }
-            (StatusCode::CREATED, Json(card)).into_response()
+
+            // Extract client IP (checking common proxy headers)
+            let ip = headers
+                .get("cf-connecting-ip")
+                .or_else(|| headers.get("x-real-ip"))
+                .or_else(|| headers.get("x-forwarded-for"))
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.split(',').next())
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|| "127.0.0.1".to_string());
+
+            let mut claimed = state.faucet_claimed_ips.write().await;
+            let mut remaining = state.faucet_pool_remaining.write().await;
+
+            let (faucet_granted, faucet_reason) = if claimed.contains(&ip) {
+                (0.0, "ip_already_claimed")
+            } else if *remaining >= 20.0 {
+                use rand::Rng;
+                let mut rng = rand::thread_rng();
+                let random_amount: f64 = rng.gen_range(20..=60) as f64;
+                let grant = random_amount.min(*remaining);
+                *remaining -= grant;
+                claimed.insert(ip.clone());
+                (grant, "starter_pool_grant")
+            } else {
+                (0.0, "starter_pool_exhausted")
+            };
+
+            let resp = json!({
+                "status": "registered",
+                "agent": card,
+                "faucet": {
+                    "granted": faucet_granted,
+                    "remainingPool": *remaining,
+                    "reason": faucet_reason,
+                    "clientIp": ip
+                }
+            });
+
+            (StatusCode::CREATED, Json(resp)).into_response()
         }
         Err(err) => (StatusCode::CONFLICT, err.to_string()).into_response(),
     }
+}
+
+async fn claim_faucet_handler(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    let agent_name = payload
+        .get("agentName")
+        .or_else(|| payload.get("name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if agent_name.is_empty() {
+        return (StatusCode::BAD_REQUEST, "agentName is required").into_response();
+    }
+
+    let ip = headers
+        .get("cf-connecting-ip")
+        .or_else(|| headers.get("x-real-ip"))
+        .or_else(|| headers.get("x-forwarded-for"))
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
+    let mut claimed = state.faucet_claimed_ips.write().await;
+    let mut remaining = state.faucet_pool_remaining.write().await;
+
+    let (faucet_granted, faucet_reason) = if claimed.contains(&ip) {
+        (0.0, "ip_already_claimed")
+    } else if *remaining >= 20.0 {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let random_amount: f64 = rng.gen_range(20..=60) as f64;
+        let grant = random_amount.min(*remaining);
+        *remaining -= grant;
+        claimed.insert(ip.clone());
+        (grant, "starter_pool_grant")
+    } else {
+        (0.0, "starter_pool_exhausted")
+    };
+
+    Json(json!({
+        "status": if faucet_granted > 0.0 { "granted" } else { "rejected" },
+        "agentName": agent_name,
+        "faucet": {
+            "granted": faucet_granted,
+            "remainingPool": *remaining,
+            "reason": faucet_reason,
+            "clientIp": ip
+        }
+    }))
+    .into_response()
 }
 
 async fn get_agent(State(state): State<Arc<GatewayState>>, Path(name): Path<String>) -> Response {
@@ -1024,6 +1150,30 @@ async fn settle_contract(
     contract.status = agora_core::ContractStatus::Settled;
     contract.updated_at = chrono::Utc::now().to_rfc3339();
 
+    let price = contract.pricing.service_price_gduck;
+    let burn_fee = (price * 0.03 * 100.0).round() / 100.0;
+    let worker_payout = (price - burn_fee * 100.0).round() / 100.0;
+
+    // Credit treasury balance & record transaction
+    let mut treasury = state.treasury_balance.write().await;
+    *treasury = (*treasury + burn_fee * 100.0).round() / 100.0;
+
+    let mut txs = state.treasury_transactions.write().await;
+    txs.push(TreasuryTransaction {
+        id: format!("tx-{}", uuid::Uuid::new_v4()),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        tx_type: "burn_fee".to_string(),
+        contract_id: Some(id.clone()),
+        from: contract.parties.requester.clone(),
+        to: "treasury@agenticpool.net".to_string(),
+        gross_amount_gduck: price,
+        treasury_fee_gduck: burn_fee,
+        description: format!(
+            "3% protocol fee burned to treasury on settlement of contract {} (worker payout: {} GDUCK)",
+            id, worker_payout
+        ),
+    });
+
     // Settle trust graph: +1 Goma to worker
     let _ = state
         .registry
@@ -1203,6 +1353,26 @@ async fn arbitrate_contract(
         }
     };
 
+    // Credit treasury dispute fee & record transaction
+    let mut treasury = state.treasury_balance.write().await;
+    *treasury = (*treasury + dispute_fee * 100.0).round() / 100.0;
+
+    let mut txs = state.treasury_transactions.write().await;
+    txs.push(TreasuryTransaction {
+        id: format!("tx-{}", uuid::Uuid::new_v4()),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        tx_type: "arbitration_fee".to_string(),
+        contract_id: Some(id.clone()),
+        from: dispute_fee_paid_by.clone(),
+        to: "treasury@agenticpool.net".to_string(),
+        gross_amount_gduck: price,
+        treasury_fee_gduck: dispute_fee,
+        description: format!(
+            "Dispute arbitration fee collected by treasury on contract {} (Verdict: {:?})",
+            id, payload.verdict
+        ),
+    });
+
     // Update graph with loser-pays Plomo / Goma
     if payload.verdict == agora_core::ArbitrationVerdict::WorkerWins {
         // Worker delivered: +1 Goma to worker, +1 Plomo to requester
@@ -1271,4 +1441,133 @@ async fn arbitrate_contract(
         recommender_plomo_delta: recom_plomo,
     })
     .into_response()
+}
+
+async fn admin_overview_handler(State(state): State<Arc<GatewayState>>) -> Response {
+    let treasury_bal = *state.treasury_balance.read().await;
+    let txs = state.treasury_transactions.read().await;
+    let contracts = state.contracts.read().await;
+    let agents = state.registry.list().await;
+    let presence_list = state.registry.list_presence().await;
+
+    let total_contracts = contracts.len();
+    let settled_contracts = contracts
+        .values()
+        .filter(|c| c.status == agora_core::ContractStatus::Settled)
+        .count();
+    let active_contracts = contracts
+        .values()
+        .filter(|c| {
+            c.status == agora_core::ContractStatus::AcceptedLocked
+                || c.status == agora_core::ContractStatus::Executing
+                || c.status == agora_core::ContractStatus::Delivered
+        })
+        .count();
+    let proposed_contracts = contracts
+        .values()
+        .filter(|c| c.status == agora_core::ContractStatus::Proposed)
+        .count();
+    let disputed_contracts = contracts
+        .values()
+        .filter(|c| {
+            c.status == agora_core::ContractStatus::Disputed
+                || c.status == agora_core::ContractStatus::ArbitrationAccepted
+                || c.status == agora_core::ContractStatus::ResolvedWorkerWins
+                || c.status == agora_core::ContractStatus::ResolvedRequesterWins
+        })
+        .count();
+
+    let total_volume: f64 = contracts
+        .values()
+        .map(|c| c.pricing.service_price_gduck)
+        .sum();
+    let active_escrow: f64 = contracts
+        .values()
+        .filter(|c| {
+            c.status == agora_core::ContractStatus::AcceptedLocked
+                || c.status == agora_core::ContractStatus::Executing
+                || c.status == agora_core::ContractStatus::Delivered
+        })
+        .map(|c| c.pricing.service_price_gduck)
+        .sum();
+
+    let total_goma: u64 = agents
+        .iter()
+        .filter_map(|a| a.capabilities.agenticpool.as_ref())
+        .map(|ap| ap.duckies_score as u64)
+        .sum();
+
+    let online_nodes = presence_list.iter().filter(|p| p.is_online).count();
+    let total_services: usize = agents.iter().map(|a| a.services.len()).sum();
+
+    Json(json!({
+        "treasury": {
+            "account": "treasury@agenticpool.net",
+            "balanceGduck": treasury_bal,
+            "totalBurnedFeesGduck": txs.iter().filter(|t| t.tx_type == "burn_fee").map(|t| t.treasury_fee_gduck).sum::<f64>(),
+            "totalDisputeFeesGduck": txs.iter().filter(|t| t.tx_type == "arbitration_fee").map(|t| t.treasury_fee_gduck).sum::<f64>(),
+            "transactionCount": txs.len(),
+            "burnRatePct": 3.0
+        },
+        "economy": {
+            "totalTransactedVolumeGduck": total_volume,
+            "activeEscrowVolumeGduck": active_escrow,
+            "totalContracts": total_contracts,
+            "settledContracts": settled_contracts,
+            "activeContracts": active_contracts,
+            "proposedContracts": proposed_contracts,
+            "disputedContracts": disputed_contracts,
+            "successRatePct": if total_contracts > 0 { (settled_contracts as f64 / total_contracts as f64) * 100.0 } else { 100.0 }
+        },
+        "reputation": {
+            "totalAgents": agents.len(),
+            "totalGomaAwarded": total_goma,
+            "totalPlomoPenalties": 0.0,
+            "activeKillSwitches": 0,
+            "globalSuccessRatioPct": 100.0
+        },
+        "network": {
+            "onlineNodes": online_nodes,
+            "totalServices": total_services,
+            "version": "2.0.7",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }
+    }))
+    .into_response()
+}
+
+async fn admin_transactions_handler(State(state): State<Arc<GatewayState>>) -> Response {
+    let txs = state.treasury_transactions.read().await;
+    Json(json!({ "transactions": *txs })).into_response()
+}
+
+async fn admin_contracts_handler(State(state): State<Arc<GatewayState>>) -> Response {
+    let contracts = state.contracts.read().await;
+    let list: Vec<_> = contracts.values().cloned().collect();
+    Json(json!({ "contracts": list })).into_response()
+}
+
+async fn admin_trust_handler(State(state): State<Arc<GatewayState>>) -> Response {
+    let agents = state.registry.list().await;
+    let presence_list = state.registry.list_presence().await;
+    let presence_map: HashMap<String, bool> = presence_list
+        .into_iter()
+        .map(|p| (p.agent_name, p.is_online))
+        .collect();
+
+    let trust_list: Vec<_> = agents
+        .into_iter()
+        .map(|a| {
+            let is_online = presence_map.get(&a.name).copied().unwrap_or(false);
+            json!({
+                "name": a.name,
+                "url": a.url,
+                "servicesCount": a.services.len(),
+                "services": a.services,
+                "isOnline": is_online,
+                "capabilities": a.capabilities
+            })
+        })
+        .collect();
+    Json(json!({ "trustGraph": trust_list })).into_response()
 }

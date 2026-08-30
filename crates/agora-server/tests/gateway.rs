@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use agora_core::a2a::{GetTaskParams, JsonRpcRequest, Message, SendParams, Task, TaskState};
+use agora_core::a2a::{
+    AgentCard, GetTaskParams, JsonRpcRequest, Message, SendParams, Task, TaskState,
+};
 use agora_server::{echo_card, EchoAgent, Gateway};
 use axum::body::{to_bytes, Body};
 use axum::http::{header, Request, StatusCode};
@@ -604,4 +606,144 @@ async fn agentic_contract_lifecycle_and_arbitration() {
     assert_eq!(settlement["workerPayoutGduck"], 25.0);
     assert_eq!(settlement["disputeFeePaidBy"], "alice");
     assert_eq!(settlement["disputeFeeAmountGduck"], 4.5);
+}
+
+#[tokio::test]
+async fn server_faucet_pool_and_anti_sybil_ip_rate_limiting() {
+    let gateway = Gateway::new();
+    let app = gateway.router();
+
+    // 1. Register agent from unique IP 192.168.1.100 -> Should receive 20-60 GDUCK
+    let agent_alice = AgentCard::new("alice_faucet", Some("Alice".into()), "http://x", "0.1.0");
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/agents")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-forwarded-for", "192.168.1.100")
+                .body(Body::from(serde_json::to_vec(&agent_alice).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let grant = body["faucet"]["granted"].as_f64().unwrap();
+    assert!((20.0..=60.0).contains(&grant));
+    assert_eq!(body["faucet"]["reason"], "starter_pool_grant");
+    assert!(body["faucet"]["remainingPool"].as_f64().unwrap() <= 10_000.0 - grant);
+
+    // 2. Register another agent from the SAME IP 192.168.1.100 -> Should receive 0 GDUCK (ip_already_claimed)
+    let agent_bob = AgentCard::new("bob_faucet", Some("Bob".into()), "http://x", "0.1.0");
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/agents")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-forwarded-for", "192.168.1.100")
+                .body(Body::from(serde_json::to_vec(&agent_bob).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["faucet"]["granted"], 0.0);
+    assert_eq!(body["faucet"]["reason"], "ip_already_claimed");
+
+    // 3. Register from new IP 10.0.0.50 -> Receives grant
+    let agent_charlie = AgentCard::new(
+        "charlie_faucet",
+        Some("Charlie".into()),
+        "http://x",
+        "0.1.0",
+    );
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/agents")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-real-ip", "10.0.0.50")
+                .body(Body::from(serde_json::to_vec(&agent_charlie).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let charlie_grant = body["faucet"]["granted"].as_f64().unwrap();
+    assert!((20.0..=60.0).contains(&charlie_grant));
+    assert_eq!(body["faucet"]["reason"], "starter_pool_grant");
+}
+
+#[tokio::test]
+async fn server_admin_treasury_and_monitoring_endpoints() {
+    let gateway = Gateway::new();
+    let app = gateway.router();
+
+    // 1. Check overview
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/overview")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["treasury"]["account"], "treasury@agenticpool.net");
+    assert_eq!(body["treasury"]["burnRatePct"], 3.0);
+    assert!(body["network"]["version"].is_string());
+
+    // 2. Check transactions endpoint
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/transactions")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 3. Check contracts endpoint
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/contracts")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 4. Check trust endpoint
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/trust")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
 }
