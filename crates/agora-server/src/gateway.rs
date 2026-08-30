@@ -189,10 +189,22 @@ impl Gateway {
             )
             .route("/v1/dead-letters/{id}/replay", post(replay_dead_letter))
             .route("/v1/journal", get(list_journal))
-            .route("/v1/admin/overview", get(admin_overview_handler))
-            .route("/v1/admin/transactions", get(admin_transactions_handler))
-            .route("/v1/admin/contracts", get(admin_contracts_handler))
-            .route("/v1/admin/trust", get(admin_trust_handler))
+            .route(
+                "/v1/admin/overview",
+                get(admin_overview_handler).options(options_cors_handler),
+            )
+            .route(
+                "/v1/admin/transactions",
+                get(admin_transactions_handler).options(options_cors_handler),
+            )
+            .route(
+                "/v1/admin/contracts",
+                get(admin_contracts_handler).options(options_cors_handler),
+            )
+            .route(
+                "/v1/admin/trust",
+                get(admin_trust_handler).options(options_cors_handler),
+            )
             .route("/a2a/{agent}", post(agent_jsonrpc))
             .route(
                 "/a2a/{agent}/.well-known/agent-card.json",
@@ -1620,6 +1632,24 @@ async fn admin_trust_handler(State(state): State<Arc<GatewayState>>) -> Response
 
 fn cors_json(val: serde_json::Value) -> Response {
     let mut resp = Json(val).into_response();
+    let headers = resp.headers_mut();
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        "*".parse().unwrap(),
+    );
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_METHODS,
+        "GET, POST, OPTIONS".parse().unwrap(),
+    );
+    headers.insert(
+        axum::http::header::ACCESS_CONTROL_ALLOW_HEADERS,
+        "*".parse().unwrap(),
+    );
+    resp
+}
+
+async fn options_cors_handler() -> Response {
+    let mut resp = StatusCode::NO_CONTENT.into_response();
     let headers = resp.headers_mut();
     headers.insert(
         axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
