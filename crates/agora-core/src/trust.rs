@@ -2,16 +2,57 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Configuration parameters for evaluating trust in the directed trust graph.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrustEvaluationConfig {
+    /// Weight multiplier for positive endorsements (default: 1.0)
+    pub weight_endorsement: f64,
+    /// Weight multiplier for fault/dispute penalties (default: 2.5)
+    pub weight_penalty: f64,
+    /// Damping / exploration weight for connection diversity (default: 2.0)
+    pub weight_network: f64,
+    /// Risk factor for direct local history (default: 5.0)
+    pub risk_factor: f64,
+    /// Minimum credibility percentage to achieve 'Trusted' verdict (default: 75.0)
+    pub trusted_threshold: f64,
+    /// Minimum credibility percentage to achieve 'ExploreRecommended' verdict (default: 70.0)
+    pub explore_threshold: f64,
+    /// Minimum penalties required to trigger Kill-Switch veto (default: 1.0)
+    pub kill_switch_penalty_threshold: f64,
+    /// Maximum allowable endorsement-to-penalty ratio before veto (default: 1.0)
+    pub kill_switch_ratio_limit: f64,
+}
+
+impl Default for TrustEvaluationConfig {
+    fn default() -> Self {
+        Self {
+            weight_endorsement: 1.0,
+            weight_penalty: 2.5,
+            weight_network: 2.0,
+            risk_factor: 5.0,
+            trusted_threshold: 75.0,
+            explore_threshold: 70.0,
+            kill_switch_penalty_threshold: 1.0,
+            kill_switch_ratio_limit: 1.0,
+        }
+    }
+}
+
 /// A directed trust edge in the trust graph.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TrustEdge {
     pub from_agent: String,
     pub to_agent: String,
-    pub goma: u64,
-    pub plomo: f64,
-    pub recom_goma: u64,
-    pub recom_plomo: f64,
+    #[serde(alias = "goma")]
+    pub endorsements: u64,
+    #[serde(alias = "plomo")]
+    pub penalties: f64,
+    #[serde(alias = "recomGoma", alias = "recom_goma")]
+    pub recom_endorsements: u64,
+    #[serde(alias = "recomPlomo", alias = "recom_plomo")]
+    pub recom_penalties: f64,
     pub last_interaction: String,
 }
 
@@ -30,8 +71,10 @@ pub enum TrustVerdict {
 #[serde(rename_all = "camelCase")]
 pub struct GlobalTrustMetrics {
     pub score: f64,
-    pub goma_total: u64,
-    pub plomo_total: f64,
+    #[serde(alias = "gomaTotal", alias = "goma_total")]
+    pub total_endorsements: u64,
+    #[serde(alias = "plomoTotal", alias = "plomo_total")]
+    pub total_penalties: f64,
     pub connections: usize,
     pub ratio: f64,
 }
@@ -41,8 +84,10 @@ pub struct GlobalTrustMetrics {
 #[serde(rename_all = "camelCase")]
 pub struct DirectTrustHistory {
     pub has_history: bool,
-    pub goma_local: u64,
-    pub plomo_local: f64,
+    #[serde(alias = "gomaLocal", alias = "goma_local")]
+    pub local_endorsements: u64,
+    #[serde(alias = "plomoLocal", alias = "plomo_local")]
+    pub local_penalties: f64,
     pub local_score: Option<f64>,
     pub kill_switch_active: bool,
 }

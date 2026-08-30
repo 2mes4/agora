@@ -422,6 +422,7 @@ async fn trust_graph_and_evaluation_api() {
     let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
     let body: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(body["taskId"], "task-12345");
+    assert_eq!(body["endorsementsAwarded"], 1);
     assert_eq!(body["gomaAwarded"], 1);
 
     // 2. Evaluate Bob from Alice's perspective
@@ -441,7 +442,7 @@ async fn trust_graph_and_evaluation_api() {
 
     assert_eq!(body["target"], "bob");
     assert_eq!(body["perspectiveFrom"], "alice");
-    assert_eq!(body["globalMetrics"]["gomaTotal"], 1);
+    assert_eq!(body["globalMetrics"]["totalEndorsements"], 1);
     assert_eq!(body["personalizedTrust"]["verdict"], "trusted");
     assert_eq!(body["personalizedTrust"]["killSwitchActive"], false);
     assert!(

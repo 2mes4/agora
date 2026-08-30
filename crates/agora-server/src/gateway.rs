@@ -605,18 +605,53 @@ async fn search_services(
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct TrustEvaluateParams {
     from: Option<String>,
     target: String,
+    weight_endorsement: Option<f64>,
+    weight_penalty: Option<f64>,
+    weight_network: Option<f64>,
+    risk_factor: Option<f64>,
+    trusted_threshold: Option<f64>,
+    explore_threshold: Option<f64>,
+    kill_switch_penalty_threshold: Option<f64>,
+    kill_switch_ratio_limit: Option<f64>,
 }
 
 async fn evaluate_trust_handler(
     State(state): State<Arc<GatewayState>>,
     Query(params): Query<TrustEvaluateParams>,
 ) -> Response {
+    let mut cfg = agora_core::TrustEvaluationConfig::default();
+    if let Some(v) = params.weight_endorsement {
+        cfg.weight_endorsement = v;
+    }
+    if let Some(v) = params.weight_penalty {
+        cfg.weight_penalty = v;
+    }
+    if let Some(v) = params.weight_network {
+        cfg.weight_network = v;
+    }
+    if let Some(v) = params.risk_factor {
+        cfg.risk_factor = v;
+    }
+    if let Some(v) = params.trusted_threshold {
+        cfg.trusted_threshold = v;
+    }
+    if let Some(v) = params.explore_threshold {
+        cfg.explore_threshold = v;
+    }
+    if let Some(v) = params.kill_switch_penalty_threshold {
+        cfg.kill_switch_penalty_threshold = v;
+    }
+    if let Some(v) = params.kill_switch_ratio_limit {
+        cfg.kill_switch_ratio_limit = v;
+    }
+
     match state
         .registry
-        .evaluate_trust(params.from.as_deref(), &params.target)
+        .evaluate_trust(params.from.as_deref(), &params.target, Some(&cfg))
         .await
     {
         Ok(eval) => Json(eval).into_response(),
@@ -652,7 +687,9 @@ struct TaskReviewPayload {
 struct TaskReviewResponse {
     task_id: String,
     outcome: String,
+    endorsements_awarded: u64,
     goma_awarded: u64,
+    penalties_assessed: f64,
     plomo_assessed: f64,
     edge_updated: agora_core::trust::TrustEdge,
     recommender_edge_updated: Option<agora_core::trust::TrustEdge>,
@@ -692,16 +729,24 @@ async fn review_task_handler(
             .into_response();
     }
 
-    let (goma_delta, plomo_delta, recom_goma_delta, recom_plomo_delta) = match payload.outcome {
-        TaskReviewOutcome::Satisfied => (1u64, 0.0f64, 1u64, 0.0f64),
-        TaskReviewOutcome::Rejected => (0u64, 0.5f64, 0u64, 0.5f64),
-        TaskReviewOutcome::Disputed => (0u64, 1.0f64, 0u64, 1.0f64),
-        TaskReviewOutcome::Fraud => (0u64, 2.0f64, 0u64, 1.5f64),
-    };
+    let (endorsement_delta, penalty_delta, recom_endorsement_delta, recom_penalty_delta) =
+        match payload.outcome {
+            TaskReviewOutcome::Satisfied => (1u64, 0.0f64, 1u64, 0.0f64),
+            TaskReviewOutcome::Rejected => (0u64, 0.5f64, 0u64, 0.5f64),
+            TaskReviewOutcome::Disputed => (0u64, 1.0f64, 0u64, 1.0f64),
+            TaskReviewOutcome::Fraud => (0u64, 2.0f64, 0u64, 1.5f64),
+        };
 
     let edge = match state
         .registry
-        .record_trust_interaction(&from_agent, &to_agent, goma_delta, plomo_delta, 0, 0.0)
+        .record_trust_interaction(
+            &from_agent,
+            &to_agent,
+            endorsement_delta,
+            penalty_delta,
+            0,
+            0.0,
+        )
         .await
     {
         Ok(e) => e,
@@ -718,8 +763,8 @@ async fn review_task_handler(
                     recom,
                     0,
                     0.0,
-                    recom_goma_delta,
-                    recom_plomo_delta,
+                    recom_endorsement_delta,
+                    recom_penalty_delta,
                 )
                 .await
             {
@@ -733,8 +778,10 @@ async fn review_task_handler(
         Json(TaskReviewResponse {
             task_id,
             outcome: format!("{:?}", payload.outcome).to_lowercase(),
-            goma_awarded: goma_delta,
-            plomo_assessed: plomo_delta,
+            endorsements_awarded: endorsement_delta,
+            goma_awarded: endorsement_delta,
+            penalties_assessed: penalty_delta,
+            plomo_assessed: penalty_delta,
             edge_updated: edge,
             recommender_edge_updated,
         }),
@@ -746,7 +793,7 @@ async fn get_agent_trust_handler(
     State(state): State<Arc<GatewayState>>,
     Path(name): Path<String>,
 ) -> Response {
-    match state.registry.evaluate_trust(None, &name).await {
+    match state.registry.evaluate_trust(None, &name, None).await {
         Ok(eval) => Json(eval).into_response(),
         Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     }

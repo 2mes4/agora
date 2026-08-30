@@ -55,5 +55,5 @@ pub use task::{TaskManager, TaskSnapshot};
 pub use task_store::TaskStore;
 pub use trust::{
     DirectTrustHistory, GlobalTrustMetrics, NetworkVouching, PersonalizedTrust, TrustEdge,
-    TrustEvaluation, TrustVerdict,
+    TrustEvaluation, TrustEvaluationConfig, TrustVerdict,
 };

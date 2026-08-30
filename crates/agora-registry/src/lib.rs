@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use agora_core::a2a::{AgentCard, AgentService};
 use agora_core::trust::{
     DirectTrustHistory, GlobalTrustMetrics, NetworkVouching, PersonalizedTrust, TrustEdge,
-    TrustEvaluation, TrustVerdict,
+    TrustEvaluation, TrustEvaluationConfig, TrustVerdict,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -106,17 +106,18 @@ pub trait Registry: Send + Sync {
         &self,
         from_agent: &str,
         to_agent: &str,
-        goma_delta: u64,
-        plomo_delta: f64,
-        recom_goma_delta: u64,
-        recom_plomo_delta: f64,
+        endorsement_delta: u64,
+        penalty_delta: f64,
+        recom_endorsement_delta: u64,
+        recom_penalty_delta: f64,
     ) -> Result<TrustEdge, RegistryError>;
 
-    /// Evaluate trust of target_agent, optionally from the perspective of from_agent.
+    /// Evaluate trust of target_agent, optionally from the perspective of from_agent and with custom node config.
     async fn evaluate_trust(
         &self,
         from_agent: Option<&str>,
         target_agent: &str,
+        config: Option<&TrustEvaluationConfig>,
     ) -> Result<TrustEvaluation, RegistryError>;
 
     /// Get direct trust edge between two agents if it exists.
@@ -336,27 +337,27 @@ impl Registry for InMemoryRegistry {
         &self,
         from_agent: &str,
         to_agent: &str,
-        goma_delta: u64,
-        plomo_delta: f64,
-        recom_goma_delta: u64,
-        recom_plomo_delta: f64,
+        endorsement_delta: u64,
+        penalty_delta: f64,
+        recom_endorsement_delta: u64,
+        recom_penalty_delta: f64,
     ) -> Result<TrustEdge, RegistryError> {
         let key = (from_agent.to_string(), to_agent.to_string());
         let mut graph = self.trust_graph.write().await;
         let entry = graph.entry(key).or_insert_with(|| TrustEdge {
             from_agent: from_agent.to_string(),
             to_agent: to_agent.to_string(),
-            goma: 0,
-            plomo: 0.0,
-            recom_goma: 0,
-            recom_plomo: 0.0,
+            endorsements: 0,
+            penalties: 0.0,
+            recom_endorsements: 0,
+            recom_penalties: 0.0,
             last_interaction: Utc::now().to_rfc3339(),
         });
 
-        entry.goma += goma_delta;
-        entry.plomo += plomo_delta;
-        entry.recom_goma += recom_goma_delta;
-        entry.recom_plomo += recom_plomo_delta;
+        entry.endorsements += endorsement_delta;
+        entry.penalties += penalty_delta;
+        entry.recom_endorsements += recom_endorsement_delta;
+        entry.recom_penalties += recom_penalty_delta;
         entry.last_interaction = Utc::now().to_rfc3339();
 
         Ok(entry.clone())
@@ -373,69 +374,70 @@ impl Registry for InMemoryRegistry {
         &self,
         from_agent: Option<&str>,
         target_agent: &str,
+        config: Option<&TrustEvaluationConfig>,
     ) -> Result<TrustEvaluation, RegistryError> {
         let graph = self.trust_graph.read().await;
+        let default_cfg = TrustEvaluationConfig::default();
+        let cfg = config.unwrap_or(&default_cfg);
 
         // 1. Global Aggregation for target_agent
-        let mut goma_total: u64 = 0;
-        let mut plomo_total: f64 = 0.0;
+        let mut total_endorsements: u64 = 0;
+        let mut total_penalties: f64 = 0.0;
         let mut connections_set = std::collections::HashSet::new();
 
         for edge in graph.values() {
             if edge.to_agent == target_agent {
-                goma_total += edge.goma;
-                plomo_total += edge.plomo;
-                if edge.goma > 0 || edge.plomo > 0.0 {
+                total_endorsements += edge.endorsements;
+                total_penalties += edge.penalties;
+                if edge.endorsements > 0 || edge.penalties > 0.0 {
                     connections_set.insert(edge.from_agent.clone());
                 }
             }
         }
 
         let connections = connections_set.len();
-        let w_exito = 1.0;
-        let w_riesgo = 2.5;
-        let w_red = 2.0;
+        let global_score = (total_endorsements as f64 * cfg.weight_endorsement)
+            - (total_penalties * cfg.weight_penalty)
+            + ((1.0 + connections as f64).ln() * cfg.weight_network);
 
-        let global_score = (goma_total as f64 * w_exito) - (plomo_total * w_riesgo)
-            + ((1.0 + connections as f64).ln() * w_red);
-
-        let total_vol = goma_total as f64 + plomo_total;
+        let total_vol = total_endorsements as f64 + total_penalties;
         let global_ratio = if total_vol > 0.0 {
-            goma_total as f64 / total_vol
+            total_endorsements as f64 / total_vol
         } else {
             1.0
         };
 
         let global_metrics = GlobalTrustMetrics {
             score: (global_score * 100.0).round() / 100.0,
-            goma_total,
-            plomo_total: (plomo_total * 100.0).round() / 100.0,
+            total_endorsements,
+            total_penalties: (total_penalties * 100.0).round() / 100.0,
             connections,
             ratio: (global_ratio * 1000.0).round() / 1000.0,
         };
 
         // 2. Personalized Trust (if from_agent is provided)
         let personalized_trust = if let Some(from) = from_agent {
-            let lambda_risk = 5.0;
             let direct_edge = graph.get(&(from.to_string(), target_agent.to_string()));
 
-            let (has_history, goma_local, plomo_local, local_score, kill_switch_active) =
+            let (has_history, local_endorsements, local_penalties, local_score, kill_switch_active) =
                 if let Some(edge) = direct_edge {
-                    let kill_switch = edge.plomo > 0.0 && (edge.goma as f64) <= edge.plomo;
+                    let kill_switch = edge.penalties >= cfg.kill_switch_penalty_threshold
+                        && ((edge.endorsements as f64)
+                            <= edge.penalties * cfg.kill_switch_ratio_limit);
                     let score = if kill_switch {
                         None
                     } else {
-                        Some((edge.goma as f64) - (edge.plomo * lambda_risk))
+                        Some((edge.endorsements as f64) - (edge.penalties * cfg.risk_factor))
                     };
-                    (true, edge.goma, edge.plomo, score, kill_switch)
+                    (true, edge.endorsements, edge.penalties, score, kill_switch)
                 } else {
                     (false, 0, 0.0, None, false)
                 };
 
             let direct_interactions = DirectTrustHistory {
                 has_history,
-                goma_local,
-                plomo_local: (plomo_local * 100.0).round() / 100.0,
+                local_endorsements,
+                local_penalties: (local_penalties * 100.0).round() / 100.0,
                 local_score,
                 kill_switch_active,
             };
@@ -447,14 +449,17 @@ impl Registry for InMemoryRegistry {
             for ((f, peer), peer_edge) in graph.iter() {
                 if f == from && peer != target_agent {
                     // Check if `from` trusts this peer
-                    if peer_edge.goma > 0 && (peer_edge.goma as f64) > peer_edge.plomo {
+                    if peer_edge.endorsements > 0
+                        && (peer_edge.endorsements as f64) > peer_edge.penalties
+                    {
                         // Check if peer has edge to target
                         if let Some(target_link) =
                             graph.get(&(peer.clone(), target_agent.to_string()))
                         {
-                            if target_link.goma > 0 {
+                            if target_link.endorsements > 0 {
                                 trusted_peers.push(peer.clone());
-                                transitive_score += (target_link.goma as f64) - target_link.plomo;
+                                transitive_score +=
+                                    (target_link.endorsements as f64) - target_link.penalties;
                             }
                         }
                     }
@@ -470,11 +475,11 @@ impl Registry for InMemoryRegistry {
             let (credibility_percent, verdict) = if kill_switch_active {
                 (0.0, TrustVerdict::VetoedKillSwitch)
             } else if has_history {
-                let cred = ((goma_local as f64 + 1.0)
-                    / (goma_local as f64 + (plomo_local * 2.0) + 1.0))
+                let cred = ((local_endorsements as f64 + 1.0)
+                    / (local_endorsements as f64 + (local_penalties * 2.0) + 1.0))
                     * 100.0;
                 let clamped = cred.clamp(0.0, 100.0);
-                let verd = if clamped >= 75.0 {
+                let verd = if clamped >= cfg.trusted_threshold {
                     TrustVerdict::Trusted
                 } else {
                     TrustVerdict::Cautious
@@ -483,13 +488,13 @@ impl Registry for InMemoryRegistry {
             } else {
                 // Cold-start / exploration with transitive boost
                 let base_cred = if total_vol > 0.0 {
-                    ((goma_total as f64 + 1.0) / (total_vol + 2.0)) * 100.0
+                    ((total_endorsements as f64 + 1.0) / (total_vol + 2.0)) * 100.0
                 } else {
                     70.0
                 };
                 let boost = (network_vouching.transitive_score * 2.0).clamp(-20.0, 20.0);
                 let final_cred = (base_cred + boost).clamp(10.0, 95.0);
-                let verd = if final_cred >= 70.0 && global_score > 0.0 {
+                let verd = if final_cred >= cfg.explore_threshold && global_score > 0.0 {
                     TrustVerdict::ExploreRecommended
                 } else {
                     TrustVerdict::Cautious
@@ -630,27 +635,33 @@ mod tests {
     async fn trust_graph_and_kill_switch_veto() {
         let registry = InMemoryRegistry::new();
 
-        // 1. Record positive interactions from Alice to Bob (Goma = 5, Plomo = 0)
+        // 1. Record positive interactions from Alice to Bob (Endorsements = 5, Penalties = 0)
         registry
             .record_trust_interaction("alice", "bob", 5, 0.0, 0, 0.0)
             .await
             .unwrap();
 
         // Evaluate from Alice's perspective
-        let eval_alice = registry.evaluate_trust(Some("alice"), "bob").await.unwrap();
+        let eval_alice = registry
+            .evaluate_trust(Some("alice"), "bob", None)
+            .await
+            .unwrap();
         let pers_alice = eval_alice.personalized_trust.unwrap();
         assert_eq!(pers_alice.verdict, TrustVerdict::Trusted);
         assert!(!pers_alice.kill_switch_active);
         assert!(pers_alice.credibility_percent >= 80.0);
-        assert_eq!(pers_alice.direct_interactions.goma_local, 5);
+        assert_eq!(pers_alice.direct_interactions.local_endorsements, 5);
 
-        // 2. Record failure/fraud from Alice to Bob (Plomo = 5.0 -> Goma <= Plomo -> Kill Switch)
+        // 2. Record failure/fraud from Alice to Bob (Penalties = 5.0 -> Endorsements <= Penalties -> Kill Switch)
         registry
             .record_trust_interaction("alice", "bob", 0, 5.0, 0, 0.0)
             .await
             .unwrap();
 
-        let eval_vetoed = registry.evaluate_trust(Some("alice"), "bob").await.unwrap();
+        let eval_vetoed = registry
+            .evaluate_trust(Some("alice"), "bob", None)
+            .await
+            .unwrap();
         let pers_vetoed = eval_vetoed.personalized_trust.unwrap();
         assert_eq!(pers_vetoed.verdict, TrustVerdict::VetoedKillSwitch);
         assert!(pers_vetoed.kill_switch_active);
@@ -659,11 +670,22 @@ mod tests {
 
         // 3. Charlie (who never interacted with Bob) evaluates Bob -> Explores global metrics
         let eval_charlie = registry
-            .evaluate_trust(Some("charlie"), "bob")
+            .evaluate_trust(Some("charlie"), "bob", None)
             .await
             .unwrap();
         let pers_charlie = eval_charlie.personalized_trust.unwrap();
         assert!(!pers_charlie.kill_switch_active);
         assert!(!pers_charlie.direct_interactions.has_history);
+
+        // 4. Custom node config: lower trusted threshold to 50%
+        let custom_cfg = TrustEvaluationConfig {
+            trusted_threshold: 50.0,
+            ..Default::default()
+        };
+        let eval_custom = registry
+            .evaluate_trust(Some("alice"), "bob", Some(&custom_cfg))
+            .await
+            .unwrap();
+        assert!(eval_custom.personalized_trust.is_some());
     }
 }

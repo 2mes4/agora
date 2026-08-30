@@ -22,7 +22,7 @@ use agora_core::error::CoreError;
 use agora_core::task_store::TaskStore;
 use agora_core::trust::{
     DirectTrustHistory, GlobalTrustMetrics, NetworkVouching, PersonalizedTrust, TrustEdge,
-    TrustEvaluation, TrustVerdict,
+    TrustEvaluation, TrustEvaluationConfig, TrustVerdict,
 };
 use agora_registry::{
     AgentPresence, AgentStatus, InMemoryRegistry, Registry, RegistryError, ServiceListing,
@@ -440,10 +440,10 @@ impl Registry for PostgresStore {
         &self,
         from_agent: &str,
         to_agent: &str,
-        goma_delta: u64,
-        plomo_delta: f64,
-        recom_goma_delta: u64,
-        recom_plomo_delta: f64,
+        endorsement_delta: u64,
+        penalty_delta: f64,
+        recom_endorsement_delta: u64,
+        recom_penalty_delta: f64,
     ) -> Result<TrustEdge, RegistryError> {
         let row = sqlx::query(
             "INSERT INTO agora_trust_graph (from_agent, to_agent, goma, plomo, recom_goma, recom_plomo, last_interaction)
@@ -458,18 +458,18 @@ impl Registry for PostgresStore {
         )
         .bind(from_agent)
         .bind(to_agent)
-        .bind(goma_delta as i64)
-        .bind(plomo_delta)
-        .bind(recom_goma_delta as i64)
-        .bind(recom_plomo_delta)
+        .bind(endorsement_delta as i64)
+        .bind(penalty_delta)
+        .bind(recom_endorsement_delta as i64)
+        .bind(recom_penalty_delta)
         .fetch_one(&self.pool)
         .await
         .map_err(|err| RegistryError::Database(err.to_string()))?;
 
-        let goma: i64 = row.try_get("goma").unwrap_or(0);
-        let plomo: f64 = row.try_get("plomo").unwrap_or(0.0);
-        let recom_goma: i64 = row.try_get("recom_goma").unwrap_or(0);
-        let recom_plomo: f64 = row.try_get("recom_plomo").unwrap_or(0.0);
+        let endorsements: i64 = row.try_get("goma").unwrap_or(0);
+        let penalties: f64 = row.try_get("plomo").unwrap_or(0.0);
+        let recom_endorsements: i64 = row.try_get("recom_goma").unwrap_or(0);
+        let recom_penalties: f64 = row.try_get("recom_plomo").unwrap_or(0.0);
         let last_seen: DateTime<Utc> = row
             .try_get("last_interaction")
             .unwrap_or_else(|_| Utc::now());
@@ -477,10 +477,10 @@ impl Registry for PostgresStore {
         Ok(TrustEdge {
             from_agent: from_agent.to_string(),
             to_agent: to_agent.to_string(),
-            goma: goma.max(0) as u64,
-            plomo: (plomo * 100.0).round() / 100.0,
-            recom_goma: recom_goma.max(0) as u64,
-            recom_plomo: (recom_plomo * 100.0).round() / 100.0,
+            endorsements: endorsements.max(0) as u64,
+            penalties: (penalties * 100.0).round() / 100.0,
+            recom_endorsements: recom_endorsements.max(0) as u64,
+            recom_penalties: (recom_penalties * 100.0).round() / 100.0,
             last_interaction: last_seen.to_rfc3339(),
         })
     }
@@ -498,10 +498,10 @@ impl Registry for PostgresStore {
         .ok()?;
 
         let row = row?;
-        let goma: i64 = row.try_get("goma").unwrap_or(0);
-        let plomo: f64 = row.try_get("plomo").unwrap_or(0.0);
-        let recom_goma: i64 = row.try_get("recom_goma").unwrap_or(0);
-        let recom_plomo: f64 = row.try_get("recom_plomo").unwrap_or(0.0);
+        let endorsements: i64 = row.try_get("goma").unwrap_or(0);
+        let penalties: f64 = row.try_get("plomo").unwrap_or(0.0);
+        let recom_endorsements: i64 = row.try_get("recom_goma").unwrap_or(0);
+        let recom_penalties: f64 = row.try_get("recom_plomo").unwrap_or(0.0);
         let last_seen: DateTime<Utc> = row
             .try_get("last_interaction")
             .unwrap_or_else(|_| Utc::now());
@@ -509,18 +509,23 @@ impl Registry for PostgresStore {
         Some(TrustEdge {
             from_agent: from_agent.to_string(),
             to_agent: to_agent.to_string(),
-            goma: goma.max(0) as u64,
-            plomo: (plomo * 100.0).round() / 100.0,
-            recom_goma: recom_goma.max(0) as u64,
-            recom_plomo: (recom_plomo * 100.0).round() / 100.0,
+            endorsements: endorsements.max(0) as u64,
+            penalties: (penalties * 100.0).round() / 100.0,
+            recom_endorsements: recom_endorsements.max(0) as u64,
+            recom_penalties: (recom_penalties * 100.0).round() / 100.0,
             last_interaction: last_seen.to_rfc3339(),
         })
     }
+
     async fn evaluate_trust(
         &self,
         from_agent: Option<&str>,
         target_agent: &str,
+        config: Option<&TrustEvaluationConfig>,
     ) -> Result<TrustEvaluation, RegistryError> {
+        let default_cfg = TrustEvaluationConfig::default();
+        let cfg = config.unwrap_or(&default_cfg);
+
         // 1. Query Global Aggregation
         let global_row = sqlx::query(
             "SELECT COALESCE(SUM(goma), 0)::BIGINT as goma_total,
@@ -534,30 +539,27 @@ impl Registry for PostgresStore {
         .await
         .map_err(|err| RegistryError::Database(err.to_string()))?;
 
-        let goma_total_i64: i64 = global_row.try_get("goma_total").unwrap_or(0);
-        let goma_total = goma_total_i64.max(0) as u64;
-        let plomo_total: f64 = global_row.try_get("plomo_total").unwrap_or(0.0);
+        let total_endorsements_i64: i64 = global_row.try_get("goma_total").unwrap_or(0);
+        let total_endorsements = total_endorsements_i64.max(0) as u64;
+        let total_penalties: f64 = global_row.try_get("plomo_total").unwrap_or(0.0);
         let connections_i64: i64 = global_row.try_get("connections").unwrap_or(0);
         let connections = connections_i64.max(0) as usize;
 
-        let w_exito = 1.0;
-        let w_riesgo = 2.5;
-        let w_red = 2.0;
+        let global_score = (total_endorsements as f64 * cfg.weight_endorsement)
+            - (total_penalties * cfg.weight_penalty)
+            + ((1.0 + connections as f64).ln() * cfg.weight_network);
 
-        let global_score = (goma_total as f64 * w_exito) - (plomo_total * w_riesgo)
-            + ((1.0 + connections as f64).ln() * w_red);
-
-        let total_vol = goma_total as f64 + plomo_total;
+        let total_vol = total_endorsements as f64 + total_penalties;
         let global_ratio = if total_vol > 0.0 {
-            goma_total as f64 / total_vol
+            total_endorsements as f64 / total_vol
         } else {
             1.0
         };
 
         let global_metrics = GlobalTrustMetrics {
             score: (global_score * 100.0).round() / 100.0,
-            goma_total,
-            plomo_total: (plomo_total * 100.0).round() / 100.0,
+            total_endorsements,
+            total_penalties: (total_penalties * 100.0).round() / 100.0,
             connections,
             ratio: (global_ratio * 1000.0).round() / 1000.0,
         };
@@ -565,25 +567,26 @@ impl Registry for PostgresStore {
         // 2. Personalized Trust (if from_agent is provided)
         let personalized_trust = if let Some(from) = from_agent {
             let direct_edge = self.get_trust_edge(from, target_agent).await;
-            let lambda_risk = 5.0;
 
-            let (has_history, goma_local, plomo_local, local_score, kill_switch_active) =
+            let (has_history, local_endorsements, local_penalties, local_score, kill_switch_active) =
                 if let Some(edge) = direct_edge {
-                    let kill_switch = edge.plomo > 0.0 && (edge.goma as f64) <= edge.plomo;
+                    let kill_switch = edge.penalties >= cfg.kill_switch_penalty_threshold
+                        && ((edge.endorsements as f64)
+                            <= edge.penalties * cfg.kill_switch_ratio_limit);
                     let score = if kill_switch {
                         None
                     } else {
-                        Some((edge.goma as f64) - (edge.plomo * lambda_risk))
+                        Some((edge.endorsements as f64) - (edge.penalties * cfg.risk_factor))
                     };
-                    (true, edge.goma, edge.plomo, score, kill_switch)
+                    (true, edge.endorsements, edge.penalties, score, kill_switch)
                 } else {
                     (false, 0, 0.0, None, false)
                 };
 
             let direct_interactions = DirectTrustHistory {
                 has_history,
-                goma_local,
-                plomo_local: (plomo_local * 100.0).round() / 100.0,
+                local_endorsements,
+                local_penalties: (local_penalties * 100.0).round() / 100.0,
                 local_score,
                 kill_switch_active,
             };
@@ -623,11 +626,11 @@ impl Registry for PostgresStore {
             let (credibility_percent, verdict) = if kill_switch_active {
                 (0.0, TrustVerdict::VetoedKillSwitch)
             } else if has_history {
-                let cred = ((goma_local as f64 + 1.0)
-                    / (goma_local as f64 + (plomo_local * 2.0) + 1.0))
+                let cred = ((local_endorsements as f64 + 1.0)
+                    / (local_endorsements as f64 + (local_penalties * 2.0) + 1.0))
                     * 100.0;
                 let clamped = cred.clamp(0.0, 100.0);
-                let verd = if clamped >= 75.0 {
+                let verd = if clamped >= cfg.trusted_threshold {
                     TrustVerdict::Trusted
                 } else {
                     TrustVerdict::Cautious
@@ -635,13 +638,13 @@ impl Registry for PostgresStore {
                 ((clamped * 10.0).round() / 10.0, verd)
             } else {
                 let base_cred = if total_vol > 0.0 {
-                    ((goma_total as f64 + 1.0) / (total_vol + 2.0)) * 100.0
+                    ((total_endorsements as f64 + 1.0) / (total_vol + 2.0)) * 100.0
                 } else {
                     70.0
                 };
                 let boost = (network_vouching.transitive_score * 2.0).clamp(-20.0, 20.0);
                 let final_cred = (base_cred + boost).clamp(10.0, 95.0);
-                let verd = if final_cred >= 70.0 && global_score > 0.0 {
+                let verd = if final_cred >= cfg.explore_threshold && global_score > 0.0 {
                     TrustVerdict::ExploreRecommended
                 } else {
                     TrustVerdict::Cautious
